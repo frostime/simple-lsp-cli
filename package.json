@@ -7,7 +7,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/frostime/simple-lsp-cli"
+    "url": "git+https://github.com/frostime/simple-lsp-cli.git"
   },
   "homepage": "https://github.com/frostime/simple-lsp-cli",
   "keywords": [
