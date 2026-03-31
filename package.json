@@ -31,7 +31,8 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "skills"
   ],
   "scripts": {
     "build": "tsc",

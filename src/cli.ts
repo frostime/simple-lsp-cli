@@ -217,7 +217,14 @@ async function exec(
 
 // ─── Help text ────────────────────────────────────────────────
 
-const HELP = `
+function buildHelp(): string {
+  const pkgRoot = path.resolve(fileURLToPath(import.meta.url), "../../");
+  const skillPath = path.join(pkgRoot, "skills", "simple-lsp-cli", "SKILL.md");
+  const skillLine = fs.existsSync(skillPath)
+    ? `  ${skillPath}`
+    : `  (not found locally) https://github.com/frostime/simple-lsp-cli/blob/main/skills/simple-lsp-cli/SKILL.md`;
+
+  return `
 simple-lsp-cli (slsp) — LSP operations from the command line.
 Designed for AI agent tool use. All output is structured JSON.
 
@@ -267,7 +274,12 @@ EXAMPLES:
   slsp symbols -f src/main.py
   slsp rename -f src/main.py -l 5 -c 8 --new-name newFunc
   slsp daemon start && slsp hover -f src/main.py -l 10 -c 5
+
+AGENT SKILL:
+  Read the SKILL.md for agent usage guide:
+${skillLine}
 `.trim();
+}
 
 // ─── Main ─────────────────────────────────────────────────────
 
@@ -276,7 +288,7 @@ async function main() {
   const { command, subcommand, flags } = parsed;
 
   if (!command || flags.help) {
-    console.log(HELP);
+    console.log(buildHelp());
     process.exit(0);
   }
 
