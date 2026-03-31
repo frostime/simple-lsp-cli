@@ -10,7 +10,10 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -18,10 +21,15 @@
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
-    "typescript": "^5.5.0",
-    "@types/node": "^20.14.0"
+    "@types/cross-spawn": "^6.0.6",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "cross-spawn": "^7.0.6",
+    "vscode-jsonrpc": "^8.2.1"
   }
 }

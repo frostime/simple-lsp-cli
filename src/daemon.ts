@@ -23,6 +23,10 @@ function stateDir(): string {
 }
 
 export function getSocketPath(): string {
+  if (process.platform === "win32") {
+    // Windows: use TCP port file instead of socket
+    return path.join(stateDir(), `daemon-port.txt`);
+  }
   return path.join(stateDir(), `daemon-${process.getuid?.() ?? 0}.sock`);
 }
 
@@ -94,14 +98,9 @@ class SessionPool {
 // ─── Daemon Server ────────────────────────────────────────────
 
 export async function startDaemon(verbose = false): Promise<void> {
-  const sockPath = getSocketPath();
   const pidFile = getPidFile();
-
-  if (fs.existsSync(sockPath)) {
-    try { fs.unlinkSync(sockPath); } catch { /* ok */ }
-  }
-
   const pool = new SessionPool();
+  const isWindows = process.platform === "win32";
 
   const server = net.createServer((socket) => {
     let buf = "";
@@ -120,15 +119,36 @@ export async function startDaemon(verbose = false): Promise<void> {
     });
   });
 
-  server.listen(sockPath, () => {
-    fs.writeFileSync(pidFile, String(process.pid));
-    if (verbose) process.stderr.write(`[daemon] pid=${process.pid} sock=${sockPath}\n`);
-  });
+  if (isWindows) {
+    // Windows: use TCP on localhost with random port
+    const portFile = getSocketPath();
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address() as net.AddressInfo;
+      fs.writeFileSync(portFile, String(addr.port));
+      fs.writeFileSync(pidFile, String(process.pid));
+      if (verbose) process.stderr.write(`[daemon] pid=${process.pid} port=${addr.port}\n`);
+    });
+  } else {
+    // Unix: use domain socket
+    const sockPath = getSocketPath();
+    if (fs.existsSync(sockPath)) {
+      try { fs.unlinkSync(sockPath); } catch { /* ok */ }
+    }
+    server.listen(sockPath, () => {
+      fs.writeFileSync(pidFile, String(process.pid));
+      if (verbose) process.stderr.write(`[daemon] pid=${process.pid} sock=${sockPath}\n`);
+    });
+  }
 
   const cleanup = async () => {
     await pool.stopAll();
     server.close();
-    try { fs.unlinkSync(sockPath); } catch {}
+    if (process.platform !== "win32") {
+      const sockPath = getSocketPath();
+      try { fs.unlinkSync(sockPath); } catch {}
+    } else {
+      try { fs.unlinkSync(getSocketPath()); } catch {}
+    }
     try { fs.unlinkSync(pidFile); } catch {}
     process.exit(0);
   };
@@ -209,7 +229,20 @@ export function isDaemonRunning(): boolean {
 
 export function sendToDaemon(req: DaemonRequest): Promise<DaemonResponse> {
   return new Promise((resolve, reject) => {
-    const sock = net.createConnection(getSocketPath());
+    let sock: net.Socket;
+
+    if (process.platform === "win32") {
+      // Windows: read port from file, connect via TCP
+      const portFile = getSocketPath();
+      if (!fs.existsSync(portFile)) {
+        return reject(new Error("Daemon not running (no port file)"));
+      }
+      const port = parseInt(fs.readFileSync(portFile, "utf-8").trim(), 10);
+      sock = net.createConnection(port, "127.0.0.1");
+    } else {
+      sock = net.createConnection(getSocketPath());
+    }
+
     let buf = "";
 
     sock.on("connect", () => sock.write(JSON.stringify(req) + "\n"));
@@ -217,10 +250,16 @@ export function sendToDaemon(req: DaemonRequest): Promise<DaemonResponse> {
       buf += data.toString();
       for (const line of buf.split("\n")) {
         if (!line.trim()) continue;
-        try { resolve(JSON.parse(line)); sock.end(); return; } catch {}
+        try {
+          const parsed = JSON.parse(line);
+          clearTimeout(timer);
+          resolve(parsed);
+          sock.end();
+          return;
+        } catch {}
       }
     });
-    sock.on("error", (err) => reject(new Error(`Daemon connect failed: ${err.message}`)));
-    setTimeout(() => { sock.destroy(); reject(new Error("Daemon timeout")); }, 60_000);
+    sock.on("error", (err) => { clearTimeout(timer); reject(new Error(`Daemon connect failed: ${err.message}`)); });
+    const timer = setTimeout(() => { sock.destroy(); reject(new Error("Daemon timeout")); }, 60_000);
   });
 }

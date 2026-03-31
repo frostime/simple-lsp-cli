@@ -9,6 +9,7 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { LspClient } from "./lsp-client.js";
 import { resolveServer, findServerName, SERVER_REGISTRY } from "./servers.js";
 import { startDaemon, isDaemonRunning, sendToDaemon, type DaemonRequest } from "./daemon.js";
@@ -388,13 +389,6 @@ async function handleDaemon(sub: string | undefined, flags: Record<string, strin
     default:
       die("daemon", `Unknown subcommand: ${sub}. Use start|stop|status`);
   }
-}
-
-// ─── ESM helper ───────────────────────────────────────────────
-
-function fileURLToPath(url: string): string {
-  if (url.startsWith("file://")) return url.slice(7);
-  return url;
 }
 
 // ─── Go ───────────────────────────────────────────────────────

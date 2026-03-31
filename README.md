@@ -1,11 +1,12 @@
 # simple-lsp-cli
 
-**零运行时依赖**的 CLI 工具，用于调用 [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) 方法。专为 AI Agent 工具调用设计。
+**轻量级**的 CLI 工具，用于调用 [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) 方法。专为 AI Agent 工具调用设计。
 
 ## 特性
 
 - **Agent 友好**：所有输出均为结构化 JSON，便于解析
-- **零依赖**：运行时无任何 npm 依赖，仅需 Node.js ≥ 18
+- **轻量依赖**：仅依赖 `cross-spawn` + `vscode-jsonrpc`，需 Node.js ≥ 18
+- **跨平台**：完整支持 Windows / macOS / Linux
 - **自动检测**：根据文件扩展名自动选择语言服务器
 - **Daemon 模式**：后台常驻进程，避免重复初始化，大幅加速连续调用
 - **全面 LSP 覆盖**：hover / definition / references / completion / diagnostics / symbols / rename / format / code-actions / signature-help / type-definition
@@ -28,7 +29,7 @@ pip install python-lsp-server
 
 ```bash
 cd simple-lsp-cli
-npm install        # 仅安装 devDependencies（TypeScript 编译器）
+npm install        # 安装依赖
 npm run build
 npm link           # 全局注册 simple-lsp-cli / slsp 命令
 ```

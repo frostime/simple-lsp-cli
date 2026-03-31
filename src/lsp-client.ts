@@ -3,7 +3,8 @@
  * typed wrappers around standard LSP requests.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import crossSpawn from "cross-spawn";
+import { type ChildProcess } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { JsonRpcConnection } from "./jsonrpc.js";
@@ -53,7 +54,7 @@ export class LspClient {
     const { server, rootPath, verbose, timeout } = this.opts;
     this.log(`Spawning: ${server.command} ${server.args.join(" ")}`);
 
-    this.proc = spawn(server.command, server.args, {
+    this.proc = crossSpawn(server.command, server.args, {
       cwd: rootPath,
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env },
@@ -82,22 +83,28 @@ export class LspClient {
     this.conn = new JsonRpcConnection(
       this.proc.stdout,
       this.proc.stdin,
-      timeout ?? 30_000
+      timeout ?? 30_000,
+      verbose
     );
 
     // Collect diagnostics
     this.conn.onNotification("textDocument/publishDiagnostics", (params) => {
       const p = params as { uri: string; diagnostics: LspDiagnostic[] };
-      this.diagnosticsMap.set(p.uri, p.diagnostics);
-      const w = this.diagnosticsWaiters.get(p.uri);
-      if (w) {
+      const key = normalizeUri(p.uri);
+      this.diagnosticsMap.set(key, p.diagnostics);
+      const w = this.diagnosticsWaiters.get(key);
+      if (w && p.diagnostics.length > 0) {
+        // Only resolve on non-empty diagnostics; empty may be an initial placeholder
         clearTimeout(w.timer);
-        this.diagnosticsWaiters.delete(p.uri);
+        this.diagnosticsWaiters.delete(key);
         w.resolve(p.diagnostics);
       }
     });
 
     // Handle workspace/configuration requests from server
+    this.conn.onRequest("workspace/configuration", () => {
+      return [{}];
+    });
     this.conn.onNotification("window/logMessage", () => {});
     this.conn.onNotification("window/showMessage", () => {});
 
@@ -134,7 +141,6 @@ export class LspClient {
           synchronization: { didSave: true },
         },
         workspace: {
-          workspaceFolders: true,
           configuration: true,
           applyEdit: false,
         },
@@ -276,15 +282,16 @@ export class LspClient {
 
   async diagnostics(file: string, waitMs = 5000): Promise<LspDiagnostic[]> {
     const uri = await this.openFile(file);
-    const existing = this.diagnosticsMap.get(uri);
+    const key = normalizeUri(uri);
+    const existing = this.diagnosticsMap.get(key);
     if (existing && existing.length > 0) return existing;
 
     return new Promise<LspDiagnostic[]>((resolve) => {
       const timer = setTimeout(() => {
-        this.diagnosticsWaiters.delete(uri);
-        resolve(this.diagnosticsMap.get(uri) ?? []);
+        this.diagnosticsWaiters.delete(key);
+        resolve(this.diagnosticsMap.get(key) ?? []);
       }, waitMs);
-      this.diagnosticsWaiters.set(uri, { resolve, timer });
+      this.diagnosticsWaiters.set(key, { resolve, timer });
     });
   }
 
@@ -298,9 +305,24 @@ export class LspClient {
 // ─── URI Helpers ──────────────────────────────────────────────
 
 export function pathToUri(p: string): string {
-  return `file://${path.resolve(p)}`;
+  const resolved = path.resolve(p).replace(/\\/g, "/");
+  // Windows: /C:/foo → file:///C:/foo
+  // Unix:    /foo    → file:///foo
+  if (resolved.startsWith("/")) {
+    return `file://${resolved}`;
+  }
+  return `file:///${resolved}`;
 }
 
 export function uriToPath(uri: string): string {
   return uri.startsWith("file://") ? uri.slice(7) : uri;
+}
+
+/** Normalize a URI for use as a map key (lowercase drive, decode %3A). */
+export function normalizeUri(uri: string): string {
+  // Decode percent-encoded colon: %3A → :
+  let normalized = uri.replace(/%3[Aa]/g, ":");
+  // Lowercase the drive letter: file:///H: → file:///h:
+  normalized = normalized.replace(/^file:\/\/\/([A-Z]):/, (_, d) => `file:///${d.toLowerCase()}:`);
+  return normalized;
 }
