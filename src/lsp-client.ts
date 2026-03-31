@@ -59,6 +59,7 @@ export class LspClient {
       cwd: rootPath,
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env },
+      windowsHide: true,
     });
 
     if (!this.proc.stdout || !this.proc.stdin) {

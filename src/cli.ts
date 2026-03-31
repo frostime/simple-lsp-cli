@@ -364,7 +364,7 @@ async function startDaemonBackground(verbose = false): Promise<boolean> {
     process.execPath,
     [...process.execArgv, fileURLToPath(import.meta.url), "daemon", "start", "--foreground",
       ...(verbose ? ["--verbose"] : [])],
-    { detached: true, stdio: "ignore" }
+    { detached: true, stdio: "ignore", windowsHide: true }
   );
   child.unref();
   await new Promise((r) => setTimeout(r, 600));

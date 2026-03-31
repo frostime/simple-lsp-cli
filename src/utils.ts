@@ -21,7 +21,7 @@ export function jsonOutput(data: {
   result?: unknown;
   error?: string;
 }): string {
-  return JSON.stringify(data, null, 2);
+  return JSON.stringify(data, null, 1);
 }
 
 // ─── LSP result simplifier ───────────────────────────────────
