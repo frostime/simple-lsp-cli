@@ -134,30 +134,39 @@ async function exec(
 ) {
   const { filePath, config, serverName, rootPath } = resolveFileAndServer(flags, cmd);
   const verbose = !!flags.verbose;
+  const noDaemon = !!flags["no-daemon"];
 
   // Convert 1-based → 0-based
   const line = (numFlag(flags, "line") ?? 1) - 1;
   const col = (numFlag(flags, "col") ?? 1) - 1;
 
-  // Try daemon first
-  if (isDaemonRunning()) {
-    try {
-      const req: DaemonRequest = {
-        id: `${Date.now()}`,
-        method: cmd,
-        params: { server: serverName, root: rootPath, file: filePath, line, character: col, ...extra },
-      };
-      const resp = await sendToDaemon(req);
-      if (resp.error) die(cmd, resp.error.message, filePath);
-      out({
-        success: true,
-        command: cmd,
-        file: filePath,
-        position: flags.line ? { line: line + 1, character: col + 1 } : undefined,
-        result: simplify(resp.result),
-      });
-      return;
-    } catch { /* fall through to inline */ }
+  // Try daemon first (unless --no-daemon)
+  if (!noDaemon) {
+    // Auto-start daemon if not running
+    if (!isDaemonRunning()) {
+      await startDaemonBackground(verbose);
+      await new Promise(r => setTimeout(r, 800)); // Wait for startup
+    }
+
+    if (isDaemonRunning()) {
+      try {
+        const req: DaemonRequest = {
+          id: `${Date.now()}`,
+          method: cmd,
+          params: { server: serverName, root: rootPath, file: filePath, line, character: col, ...extra },
+        };
+        const resp = await sendToDaemon(req);
+        if (resp.error) die(cmd, resp.error.message, filePath);
+        out({
+          success: true,
+          command: cmd,
+          file: filePath,
+          position: flags.line ? { line: line + 1, character: col + 1 } : undefined,
+          result: simplify(resp.result),
+        });
+        return;
+      } catch { /* fall through to inline */ }
+    }
   }
 
   // Inline mode
@@ -233,8 +242,11 @@ COMMANDS (file-based, need --file):
 MANAGEMENT:
   daemon start       Start background daemon (add --foreground to block)
   daemon stop        Stop daemon
-  daemon status      Check daemon status
+  daemon status      Check daemon status (shows idle time)
   servers            List configured language servers
+
+NOTE: A daemon is auto-started on first LSP command and auto-stops
+      after 15 minutes of inactivity. Manual start/stop is optional.
 
 OPTIONS:
   -f, --file <path>       Target file (required)
@@ -245,6 +257,7 @@ OPTIONS:
   -n, --new-name <name>   New name (for rename)
   -w, --wait <ms>         Diagnostics wait time (default: 5000)
   -v, --verbose           Log LSP traffic to stderr
+  --no-daemon             Force inline mode (skip daemon)
   -h, --help              Show this help
 
 EXAMPLES:
@@ -334,6 +347,18 @@ async function main() {
   }
 }
 
+async function startDaemonBackground(verbose = false): Promise<boolean> {
+  const child = spawn(
+    process.execPath,
+    [...process.execArgv, fileURLToPath(import.meta.url), "daemon", "start", "--foreground",
+      ...(verbose ? ["--verbose"] : [])],
+    { detached: true, stdio: "ignore" }
+  );
+  child.unref();
+  await new Promise((r) => setTimeout(r, 600));
+  return isDaemonRunning();
+}
+
 async function handleDaemon(sub: string | undefined, flags: Record<string, string | boolean>) {
   switch (sub) {
     case "start": {
@@ -345,19 +370,11 @@ async function handleDaemon(sub: string | undefined, flags: Record<string, strin
         await startDaemon(!!flags.verbose);
         return;
       }
-      // Fork background process
-      const child = spawn(
-        process.execPath,
-        [...process.execArgv, fileURLToPath(import.meta.url), "daemon", "start", "--foreground",
-          ...(flags.verbose ? ["--verbose"] : [])],
-        { detached: true, stdio: "ignore" }
-      );
-      child.unref();
-      await new Promise((r) => setTimeout(r, 600));
+      const started = await startDaemonBackground(!!flags.verbose);
       out({
-        success: isDaemonRunning(),
+        success: started,
         command: "daemon start",
-        result: { status: isDaemonRunning() ? "started" : "failed", pid: child.pid },
+        result: { status: started ? "started" : "failed" },
       });
       break;
     }

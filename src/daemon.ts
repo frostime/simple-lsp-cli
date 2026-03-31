@@ -97,10 +97,30 @@ class SessionPool {
 
 // ─── Daemon Server ────────────────────────────────────────────
 
-export async function startDaemon(verbose = false): Promise<void> {
+export async function startDaemon(verbose = false, idleTimeoutMs = 15 * 60 * 1000): Promise<void> {
   const pidFile = getPidFile();
   const pool = new SessionPool();
   const isWindows = process.platform === "win32";
+  let lastActivityTime = Date.now();
+  let idleCheckTimer: NodeJS.Timeout;
+
+  const resetIdleTimer = () => {
+    lastActivityTime = Date.now();
+    clearTimeout(idleCheckTimer);
+    idleCheckTimer = setTimeout(async () => {
+      const idleMs = Date.now() - lastActivityTime;
+      if (idleMs >= idleTimeoutMs) {
+        if (verbose) process.stderr.write(`[daemon] Idle timeout (${idleTimeoutMs}ms), shutting down\n`);
+        await pool.stopAll();
+        server.close();
+        try { fs.unlinkSync(getSocketPath()); } catch {}
+        try { fs.unlinkSync(pidFile); } catch {}
+        process.exit(0);
+      }
+    }, idleTimeoutMs);
+  };
+
+  resetIdleTimer();
 
   const server = net.createServer((socket) => {
     let buf = "";
@@ -111,7 +131,13 @@ export async function startDaemon(verbose = false): Promise<void> {
 
       for (const line of lines) {
         if (!line.trim()) continue;
-        handleOne(pool, line.trim(), verbose).then(
+        // Parse to check method before resetting idle timer
+        let parsed: DaemonRequest | null = null;
+        try { parsed = JSON.parse(line.trim()); } catch {}
+        if (parsed && parsed.method !== "ping") {
+          resetIdleTimer();
+        }
+        handleOne(pool, line.trim(), verbose, () => Date.now() - lastActivityTime).then(
           (resp) => socket.write(JSON.stringify(resp) + "\n"),
           (err) => socket.write(JSON.stringify({ id: "?", error: { message: String(err) } }) + "\n")
         );
@@ -159,7 +185,8 @@ export async function startDaemon(verbose = false): Promise<void> {
 async function handleOne(
   pool: SessionPool,
   raw: string,
-  verbose: boolean
+  verbose: boolean,
+  getIdleMs: () => number
 ): Promise<DaemonResponse> {
   let req: DaemonRequest;
   try { req = JSON.parse(raw); } catch { return { id: "?", error: { message: "Bad JSON" } }; }
@@ -168,10 +195,16 @@ async function handleOne(
     const { method, params } = req;
 
     if (method === "ping") {
-      return { id: req.id, result: { status: "ok", sessions: pool.list() } };
+      return { id: req.id, result: { status: "ok", sessions: pool.list(), idleMs: getIdleMs() } };
     }
     if (method === "shutdown") {
-      setTimeout(async () => { await pool.stopAll(); process.exit(0); }, 100);
+      setTimeout(async () => {
+        await pool.stopAll();
+        // Clean up state files
+        try { fs.unlinkSync(getSocketPath()); } catch {}
+        try { fs.unlinkSync(getPidFile()); } catch {}
+        process.exit(0);
+      }, 100);
       return { id: req.id, result: { status: "shutting_down" } };
     }
 
@@ -222,7 +255,11 @@ export function isDaemonRunning(): boolean {
   if (!fs.existsSync(pf)) return false;
   const pid = parseInt(fs.readFileSync(pf, "utf-8").trim(), 10);
   try { process.kill(pid, 0); return true; } catch {
+    // Process gone, clean up stale state files
     try { fs.unlinkSync(pf); } catch {}
+    if (process.platform === "win32") {
+      try { fs.unlinkSync(getSocketPath()); } catch {}
+    }
     return false;
   }
 }

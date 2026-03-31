@@ -105,12 +105,24 @@ slsp rename -f src/main.py -l 5 -c 8 -n newFunc  # 重命名
 }
 ```
 
-## Daemon 模式（推荐）
+## Daemon 模式（自动管理）
+
+首次调用任何 LSP 命令时，daemon 会自动启动，后续调用复用会话（~0.7s vs 冷启动 2-3s）。
+15 分钟无活动后自动退出，无需手动管理。
 
 ```bash
-slsp daemon start     # 启动（后台）
-slsp hover -f ...     # 复用会话，几乎无延迟
-slsp daemon stop      # 结束
+slsp hover -f src/main.py -l 10 -c 5   # 自动启动 daemon
+slsp hover -f src/main.py -l 20 -c 3   # 复用，快速响应
+# 15 分钟后自动退出
+```
+
+手动控制仍然可用：
+
+```bash
+slsp daemon start     # 立即启动
+slsp daemon status    # 查看状态 + 空闲时间
+slsp daemon stop      # 立即停止
+slsp hover --no-daemon -f ...  # 强制 inline 模式
 ```
 
 ## Agent 集成

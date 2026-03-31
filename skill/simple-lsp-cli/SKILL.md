@@ -145,18 +145,20 @@ slsp code-actions -f <file> -l <line> -c <col>
 
 返回可用的快速修复、重构操作等。
 
-## Daemon 模式（强烈推荐）
+## Daemon 模式（自动管理，无需手动操作）
 
-LSP 服务器初始化需要 1-2 秒。如果你要对同一项目执行多次操作，**务必先启动 daemon**：
+Daemon 在首次调用任何 LSP 命令时自动启动，15 分钟无活动后自动退出。
+
+首次调用稍慢（~3s，含 daemon 启动 + LSP 服务器初始化），后续调用仅 ~0.7s。
+
+**Agent 无需手动 `daemon start/stop`，直接调用 LSP 命令即可。**
 
 ```bash
-# 开始工作前
-slsp daemon start
-
-# ... 执行多次 LSP 操作（几乎无延迟）...
-
-# 工作完成后
-slsp daemon stop
+# 直接使用，daemon 自动管理
+slsp diagnostics -f src/main.py
+slsp hover -f src/main.py -l 10 -c 5
+slsp definition -f src/main.py -l 10 -c 5
+# ... 15 分钟后自动退出
 ```
 
 检查 daemon 状态：
@@ -171,70 +173,57 @@ slsp daemon status
 ### 工作流 1：诊断并修复（最常用）
 
 ```bash
-# 1. 启动 daemon
-slsp daemon start
-
-# 2. 获取诊断
+# 获取诊断
 slsp diagnostics -f src/main.py
 
-# 3. 对每个错误，用 hover 查看上下文
+# 对每个错误，用 hover 查看上下文
 slsp hover -f src/main.py -l <error_line> -c <error_col>
 
-# 4. 必要时跳转到定义查看实现
+# 必要时跳转到定义查看实现
 slsp definition -f src/main.py -l <line> -c <col>
 
-# 5. 修改代码后再次诊断验证
+# 修改代码后再次诊断验证
 slsp diagnostics -f src/main.py
-
-# 6. 完成，关闭 daemon
-slsp daemon stop
 ```
 
 ### 工作流 2：理解陌生代码
 
 ```bash
-slsp daemon start
-
-# 1. 先看文件结构
+# 先看文件结构
 slsp symbols -f src/module.py
 
-# 2. hover 关键符号了解类型
+# hover 关键符号了解类型
 slsp hover -f src/module.py -l 25 -c 10
 
-# 3. 跳转到定义深入
+# 跳转到定义深入
 slsp definition -f src/module.py -l 25 -c 10
 
-# 4. 查找引用了解使用方式
+# 查找引用了解使用方式
 slsp references -f src/module.py -l 25 -c 10
-
-slsp daemon stop
 ```
 
 ### 工作流 3：安全重构
 
 ```bash
-slsp daemon start
-
-# 1. 找到要重命名的符号的所有引用
+# 找到要重命名的符号的所有引用
 slsp references -f src/main.py -l 12 -c 5
 
-# 2. 获取重命名编辑方案
+# 获取重命名编辑方案
 slsp rename -f src/main.py -l 12 -c 5 --new-name betterName
 
-# 3. 应用编辑后验证无错
+# 应用编辑后验证无错
 slsp diagnostics -f src/main.py
-
-slsp daemon stop
 ```
 
 ## 最佳实践
 
-1. **多次操作一定要开 daemon**：单次操作时可以不开，但连续操作时 daemon 是必须的。
-2. **修改文件后重新执行 diagnostics**：LSP 服务在 inline 模式下每次重新读取文件，确保结果是最新的。
+1. **无需手动管理 daemon**：直接调用 LSP 命令，daemon 自动启动和退出。首次调用稍慢（~3s），后续快速（~0.7s）。
+2. **修改文件后重新执行 diagnostics**：确保结果是最新的。
 3. **位置参数是 1-based**：即代码编辑器里显示的行列号可以直接使用。
 4. **错误时检查 success 字段**：所有命令的输出都有 `success: true/false`，失败时 `error` 字段有原因。
 5. **用 --root 指定根目录**：如果自动检测不准确（比如 monorepo），手动指定项目根。
 6. **用 --server 切换后端**：Python 同时支持 `pyright`（默认，类型检查更严格）和 `pylsp`（功能更丰富）。
+7. **用 --no-daemon 强制 inline**：如果需要完全隔离的会话，使用 `--no-daemon` 选项。
 
 ## 错误处理
 
