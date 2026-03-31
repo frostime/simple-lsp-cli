@@ -17,7 +17,11 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "clean": "rm -rf dist",
+    "clean": "node -e \"import('node:fs').then(fs => fs.rmSync('dist', { recursive: true, force: true }))\"",
+    "pretest": "npm run build",
+    "test": "node --test test/unit/*.test.mjs test/integration/*.test.mjs",
+    "test:unit": "node --test test/unit/*.test.mjs",
+    "test:integration": "node --test test/integration/*.test.mjs",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {

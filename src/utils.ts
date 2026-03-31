@@ -28,6 +28,14 @@ export function jsonOutput(data: {
 
 export function simplify(val: unknown): unknown {
   if (val == null) return null;
+
+  if (isTextEditArray(val)) {
+    return val.map((edit) => ({
+      range: range1(edit.range),
+      newText: edit.newText,
+    }));
+  }
+
   if (Array.isArray(val)) return val.map(simplify);
   if (typeof val !== "object") return val;
 
@@ -84,11 +92,11 @@ export function simplify(val: unknown): unknown {
   if ("items" in o && "isIncomplete" in o) {
     return {
       isIncomplete: o.isIncomplete,
-      items: (o.items as Record<string, unknown>[]).map((it) => ({
-        label: it.label,
-        kind: COMPLETION_KIND[it.kind as number] ?? String(it.kind),
-        ...(it.detail ? { detail: it.detail } : {}),
-        ...(it.documentation ? { documentation: flattenContents(it.documentation) } : {}),
+      items: (o.items as Record<string, unknown>[]).map((item) => ({
+        label: item.label,
+        kind: COMPLETION_KIND[item.kind as number] ?? String(item.kind),
+        ...(item.detail ? { detail: item.detail } : {}),
+        ...(item.documentation ? { documentation: flattenContents(item.documentation) } : {}),
       })),
     };
   }
@@ -111,9 +119,9 @@ export function simplify(val: unknown): unknown {
       signatures: (o.signatures as Record<string, unknown>[]).map((sig) => ({
         label: sig.label,
         documentation: sig.documentation ? flattenContents(sig.documentation) : undefined,
-        parameters: (sig.parameters as Record<string, unknown>[] | undefined)?.map((p) => ({
-          label: p.label,
-          documentation: p.documentation ? flattenContents(p.documentation) : undefined,
+        parameters: (sig.parameters as Record<string, unknown>[] | undefined)?.map((param) => ({
+          label: param.label,
+          documentation: param.documentation ? flattenContents(param.documentation) : undefined,
         })),
       })),
     };
@@ -122,33 +130,27 @@ export function simplify(val: unknown): unknown {
   // WorkspaceEdit { changes, documentChanges }
   if ("changes" in o || "documentChanges" in o) {
     const edits: Record<string, unknown>[] = [];
+
     if (o.changes && typeof o.changes === "object") {
       for (const [uri, changes] of Object.entries(o.changes as Record<string, unknown[]>)) {
-        for (const ch of changes) {
-          const c = ch as { range: R; newText: string };
-          edits.push({ file: uriToPath(uri), range: range1(c.range), newText: c.newText });
+        for (const change of changes) {
+          const edit = change as { range: R; newText: string };
+          edits.push({ file: uriToPath(uri), range: range1(edit.range), newText: edit.newText });
         }
       }
     }
+
     if (Array.isArray(o.documentChanges)) {
       for (const dc of o.documentChanges as Record<string, unknown>[]) {
-        if (dc.textDocument && dc.edits) {
-          const uri = (dc.textDocument as { uri: string }).uri;
-          for (const e of dc.edits as { range: R; newText: string }[]) {
-            edits.push({ file: uriToPath(uri), range: range1(e.range), newText: e.newText });
-          }
+        if (!dc.textDocument || !dc.edits) continue;
+        const uri = (dc.textDocument as { uri: string }).uri;
+        for (const edit of dc.edits as { range: R; newText: string }[]) {
+          edits.push({ file: uriToPath(uri), range: range1(edit.range), newText: edit.newText });
         }
       }
     }
-    return { edits };
-  }
 
-  // TextEdit[] (e.g. from formatting)
-  if (Array.isArray(val) && val.length > 0 && "newText" in (val[0] as Record<string, unknown>)) {
-    return val.map((e) => {
-      const ed = e as { range: R; newText: string };
-      return { range: range1(ed.range), newText: ed.newText };
-    });
+    return { edits };
   }
 
   // CodeAction
@@ -163,8 +165,8 @@ export function simplify(val: unknown): unknown {
 
   // Generic fallback — recurse
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(o)) {
-    out[k] = simplify(v);
+  for (const [key, value] of Object.entries(o)) {
+    out[key] = simplify(value);
   }
   return out;
 }
@@ -172,6 +174,15 @@ export function simplify(val: unknown): unknown {
 // ─── Internal helpers ─────────────────────────────────────────
 
 type R = { start: { line: number; character: number }; end: { line: number; character: number } };
+
+function isTextEditArray(val: unknown): val is { range: R; newText: string }[] {
+  return Array.isArray(val)
+    && val.length > 0
+    && typeof val[0] === "object"
+    && val[0] !== null
+    && "newText" in (val[0] as Record<string, unknown>)
+    && "range" in (val[0] as Record<string, unknown>);
+}
 
 /** Convert 0-based range to 1-based. */
 function range1(r: R) {

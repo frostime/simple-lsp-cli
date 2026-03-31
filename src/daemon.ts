@@ -235,7 +235,7 @@ async function handleOne(
         result = await client.codeActions(
           file, line, col,
           (params.endLine as number) ?? line,
-          (params.endCharacter as number) ?? col
+          (params.endCol as number) ?? col
         );
         break;
       default:

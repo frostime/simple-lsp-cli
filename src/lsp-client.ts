@@ -7,6 +7,7 @@ import crossSpawn from "cross-spawn";
 import { type ChildProcess } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { JsonRpcConnection } from "./jsonrpc.js";
 import { type ServerConfig, getLanguageId } from "./servers.js";
 
@@ -305,17 +306,13 @@ export class LspClient {
 // ─── URI Helpers ──────────────────────────────────────────────
 
 export function pathToUri(p: string): string {
-  const resolved = path.resolve(p).replace(/\\/g, "/");
-  // Windows: /C:/foo → file:///C:/foo
-  // Unix:    /foo    → file:///foo
-  if (resolved.startsWith("/")) {
-    return `file://${resolved}`;
-  }
-  return `file:///${resolved}`;
+  return pathToFileURL(path.resolve(p)).href;
 }
 
 export function uriToPath(uri: string): string {
-  return uri.startsWith("file://") ? uri.slice(7) : uri;
+  if (!uri.startsWith("file://")) return uri;
+  const localPath = fileURLToPath(uri);
+  return localPath.replace(/^[a-z]:/, (drive) => drive.toUpperCase());
 }
 
 /** Normalize a URI for use as a map key (lowercase drive, decode %3A). */
