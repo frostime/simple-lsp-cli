@@ -1,12 +1,31 @@
 {
   "name": "simple-lsp-cli",
   "version": "1.0.0",
-  "description": "Zero-dependency CLI for invoking LSP methods — designed as an Agent tool",
-  "license": "MIT",
+  "description": "Agent-friendly CLI for invoking Language Server Protocol (LSP) methods",
+  "license": "AGPL-3.0-only",
+  "author": "frostime",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/frostime/simple-lsp-cli"
+  },
+  "homepage": "https://github.com/frostime/simple-lsp-cli",
+  "keywords": [
+    "lsp",
+    "language-server-protocol",
+    "cli",
+    "agent",
+    "typescript",
+    "python",
+    "llm",
+    "agent skill"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
-    "simple-lsp-cli": "./dist/cli.js",
-    "slsp": "./dist/cli.js"
+    "simple-lsp-cli": "dist/cli.js",
+    "slsp": "dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

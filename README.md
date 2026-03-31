@@ -14,6 +14,9 @@
 
 ## 前置要求
 
+> `simple-lsp-cli` **不内置语言服务器**。
+> 安装本 CLI 后，你仍需要为目标语言单独安装至少一个对应的 LSP Server。
+
 ```bash
 # Python（推荐 Pyright）
 npm install -g pyright
@@ -27,11 +30,26 @@ pip install python-lsp-server
 
 ## 安装
 
+### 作为 npm 包使用
+
+```bash
+npm install -g simple-lsp-cli
+```
+
+安装完成后可直接使用：
+
+```bash
+slsp --help
+simple-lsp-cli --help
+```
+
+### 本地开发
+
 ```bash
 cd simple-lsp-cli
-npm install        # 安装依赖
+npm install
 npm run build
-npm link           # 全局注册 simple-lsp-cli / slsp 命令
+npm link
 ```
 
 ## 快速开始
