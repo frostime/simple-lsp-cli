@@ -1,0 +1,27 @@
+{
+  "name": "simple-lsp-cli",
+  "version": "1.0.0",
+  "description": "Zero-dependency CLI for invoking LSP methods — designed as an Agent tool",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "simple-lsp-cli": "./dist/cli.js",
+    "slsp": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^20.14.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
