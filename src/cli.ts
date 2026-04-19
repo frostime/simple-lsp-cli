@@ -253,13 +253,63 @@ async function exec(
 
 // ─── Help text ────────────────────────────────────────────────
 
-function buildHelp(): string {
-  const pkgRoot = path.resolve(fileURLToPath(import.meta.url), "../../");
-  const skillPath = path.join(pkgRoot, "skills", "simple-lsp-cli", "SKILL.md");
-  const skillLine = fs.existsSync(skillPath)
-    ? `  ${skillPath}`
-    : `  (not found locally) https://github.com/frostime/simple-lsp-cli/blob/main/skills/simple-lsp-cli/SKILL.md`;
+/** Very small YAML-frontmatter parser (key: value only; no nesting). */
+function parseFrontmatter(content: string): Record<string, string> {
+  const m = content.match(/^---\s*\r?\n([\s\S]*?)\r?\n---/);
+  if (!m) return {};
+  const out: Record<string, string> = {};
+  for (const line of m[1].split(/\r?\n/)) {
+    const kv = line.match(/^(\w[\w-]*)\s*:\s*(.*)$/);
+    if (kv) out[kv[1]] = kv[2].trim().replace(/^["']|["']$/g, "");
+  }
+  return out;
+}
 
+/** Locate the bundled docs directory.
+ *  In a published install, cli.js lives at dist/cli.js and docs at dist/docs.
+ *  When running straight from source (e.g. tsx src/cli.ts) fall back to src/docs. */
+function findDocsDir(): string | null {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.join(here, "docs"),                 // dist/docs (post-build)
+    path.resolve(here, "../src/docs"),       // running from dist, source still around
+    path.resolve(here, "../../src/docs"),    // defensive
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+function buildDocsSection(): string {
+  const docsDir = findDocsDir();
+  if (!docsDir) {
+    return "  (bundled docs not found — reinstall the package to recover them)";
+  }
+  const files = fs.readdirSync(docsDir).filter((f) => f.endsWith(".md")).sort();
+  if (files.length === 0) return `  (no docs found in ${docsDir})`;
+
+  const lines: string[] = [
+    "  The following Mini-SKILL docs are bundled with this CLI. Agents: read",
+    "  them directly from the filesystem to learn proper usage.",
+    "",
+    `  Docs directory: ${docsDir}`,
+    "",
+  ];
+  for (const f of files) {
+    const full = path.join(docsDir, f);
+    let meta: Record<string, string> = {};
+    try { meta = parseFrontmatter(fs.readFileSync(full, "utf-8")); } catch { /* ok */ }
+    const name = meta.name || f.replace(/\.md$/, "");
+    const desc = meta.description || "(no description)";
+    lines.push(`  • ${name}`);
+    lines.push(`      path: ${full}`);
+    lines.push(`      ${desc}`);
+  }
+  return lines.join("\n");
+}
+
+function buildHelp(): string {
   return `
 simple-lsp-cli (slsp) — LSP operations from the command line.
 Designed for AI agent tool use. Default output is compact text.
@@ -313,9 +363,8 @@ EXAMPLES:
   slsp rename -f src/main.py -l 5 -c 8 --new-name newFunc
   slsp daemon start && slsp hover -f src/main.py -l 10 -c 5
 
-AGENT SKILL:
-  Read the SKILL.md for agent usage guide:
-${skillLine}
+AGENT DOCS:
+${buildDocsSection()}
 `.trim();
 }
 

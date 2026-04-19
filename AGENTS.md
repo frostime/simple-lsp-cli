@@ -4,7 +4,7 @@
 
 开发内容：
 - 源代码: `src/`
-- 内置 Agent SKILL: `skills/`
+- 内置 Agent 文档: `src/docs/*.md`（带 frontmatter 的 Mini-SKILL，`npm run build` 时会复制到 `dist/docs/` 随 npm 包发布；`slsp --help` 会自动枚举这些文档的 `name`、`description` 与绝对路径，引导 Agent 自行读取）
 
 本地开发测试:
 - 使用 `node dist/cli.js <command> [options]` 直接运行本地构建的 CLI，无需全局安装

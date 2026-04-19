@@ -35,7 +35,7 @@ test.after(() => {
 });
 
 test("servers command returns configured servers", () => {
-  const result = runCli(["servers"]);
+  const result = runCli(["servers", "--format", "json"]);
   assert.equal(result.status, 0);
   assert.equal(result.json?.success, true);
   assert.ok(Array.isArray(result.json?.result));
@@ -49,6 +49,7 @@ test("definition returns decoded local file paths", () => {
     "-l", "6",
     "-c", "16",
     "--no-daemon",
+    "--format", "json",
   ]);
 
   assert.equal(result.status, 0);
@@ -60,7 +61,7 @@ test("definition returns decoded local file paths", () => {
 });
 
 test("format returns 1-based text edit ranges", () => {
-  const result = runCli(["format", "-f", tsFile, "--no-daemon"]);
+  const result = runCli(["format", "-f", tsFile, "--no-daemon", "--format", "json"]);
 
   assert.equal(result.status, 0);
   assert.equal(result.json?.success, true);
@@ -71,8 +72,8 @@ test("format returns 1-based text edit ranges", () => {
 });
 
 test("daemon mode returns decoded local file paths", () => {
-  runCli(["daemon", "stop"]);
-  const result = runCli(["definition", "-f", tsFile, "-l", "6", "-c", "16"]);
+  runCli(["daemon", "stop", "--format", "json"]);
+  const result = runCli(["definition", "-f", tsFile, "-l", "6", "-c", "16", "--format", "json"]);
 
   assert.equal(result.status, 0);
   assert.equal(result.json?.success, true);
@@ -83,7 +84,7 @@ test("daemon mode returns decoded local file paths", () => {
 });
 
 test("unsupported file types fail with structured JSON", () => {
-  const result = runCli(["diagnostics", "-f", txtFile, "--no-daemon"]);
+  const result = runCli(["diagnostics", "-f", txtFile, "--no-daemon", "--format", "json"]);
 
   assert.equal(result.status, 1);
   assert.equal(result.json?.success, false);
