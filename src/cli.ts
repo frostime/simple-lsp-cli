@@ -2,7 +2,8 @@
 
 /**
  * simple-lsp-cli — CLI for invoking LSP methods.
- * Designed for AI agent tool use. All output is structured JSON.
+ * Designed for AI agent tool use. Default output is compact text.
+ * Use --format json for structured JSON output.
  * Positions are 1-based.
  */
 
@@ -14,6 +15,7 @@ import { LspClient } from "./lsp-client.js";
 import { resolveServer, findServerName, SERVER_REGISTRY } from "./servers.js";
 import { startDaemon, isDaemonRunning, sendToDaemon, type DaemonRequest } from "./daemon.js";
 import { simplify, jsonOutput } from "./utils.js";
+import { formatResultText } from "./format.js";
 
 // ─── Minimal arg parser ──────────────────────────────────────
 
@@ -70,9 +72,39 @@ function out(data: Parameters<typeof jsonOutput>[0]) {
   process.stdout.write(jsonOutput(data) + "\n");
 }
 
+function outText(text: string) {
+  process.stdout.write(text.endsWith("\n") ? text : text + "\n");
+}
+
 function die(cmd: string, msg: string, file?: string): never {
   out({ success: false, command: cmd, file, error: msg });
   process.exit(1);
+}
+
+function outputResult(args: {
+  format: string;
+  command: string;
+  file: string;
+  position?: { line: number; character: number };
+  result: unknown;
+}) {
+  if (args.format === "json") {
+    out({
+      success: true,
+      command: args.command,
+      file: args.file,
+      position: args.position,
+      result: simplify(args.result),
+    });
+    return;
+  }
+
+  outText(formatResultText({
+    command: args.command,
+    file: args.file,
+    position: args.position,
+    result: simplify(args.result),
+  }));
 }
 
 function requireFlag(flags: Record<string, string | boolean>, key: string, cmd: string): string {
@@ -135,6 +167,10 @@ async function exec(
   const { filePath, config, serverName, rootPath } = resolveFileAndServer(flags, cmd);
   const verbose = !!flags.verbose;
   const noDaemon = !!flags["no-daemon"];
+  const format = flags.format && flags.format !== true ? String(flags.format) : "text";
+  if (format !== "text" && format !== "json") {
+    die(cmd, `Unsupported format: ${format}. Use --format text|json`, filePath);
+  }
 
   // Convert 1-based → 0-based
   const line = (numFlag(flags, "line") ?? 1) - 1;
@@ -157,12 +193,12 @@ async function exec(
         };
         const resp = await sendToDaemon(req);
         if (resp.error) die(cmd, resp.error.message, filePath);
-        out({
-          success: true,
+        outputResult({
+          format,
           command: cmd,
           file: filePath,
           position: flags.line ? { line: line + 1, character: col + 1 } : undefined,
-          result: simplify(resp.result),
+          result: resp.result,
         });
         return;
       } catch { /* fall through to inline */ }
@@ -201,12 +237,12 @@ async function exec(
         die(cmd, `Unknown command: ${cmd}`, filePath);
     }
 
-    out({
-      success: true,
+    outputResult({
+      format,
       command: cmd,
       file: filePath,
       position: flags.line ? { line: line + 1, character: col + 1 } : undefined,
-      result: simplify(result),
+      result,
     });
   } catch (err) {
     die(cmd, err instanceof Error ? err.message : String(err), filePath);
@@ -226,7 +262,8 @@ function buildHelp(): string {
 
   return `
 simple-lsp-cli (slsp) — LSP operations from the command line.
-Designed for AI agent tool use. All output is structured JSON.
+Designed for AI agent tool use. Default output is compact text.
+Use --format json for structured JSON output.
 
 USAGE:
   slsp <command> [options]
@@ -264,6 +301,7 @@ OPTIONS:
   -n, --new-name <name>   New name (for rename)
   -w, --wait <ms>         Diagnostics wait time (default: 5000)
   -v, --verbose           Log LSP traffic to stderr
+  --format <text|json>    Output format (default: text)
   --no-daemon             Force inline mode (skip daemon)
   -h, --help              Show this help
 
