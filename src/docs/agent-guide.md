@@ -39,6 +39,9 @@ server is missing.
 | Preview the effect of renaming a symbol | `rename` |
 | Discover quick-fixes | `code-actions` |
 
+For guidance on when to reach for `slsp` vs `grep`/`rg`, read `slsp-vs-grep`
+(same directory).
+
 ## Rules that actually matter
 
 1. `--line` and `--col` are **1-based** (matches what editors show).
@@ -81,5 +84,5 @@ Always check `success` first. Paths in `result` are absolute; ranges are
 
 ## Next
 
-Read `slsp-commands` (same directory) for per-command flags, result shapes,
-and failure modes.
+- `slsp-commands` — per-command flags, result shapes, failure modes.
+- `slsp-vs-grep` — when to use slsp vs grep/rg, and how to combine them.

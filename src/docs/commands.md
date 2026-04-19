@@ -38,6 +38,10 @@ slsp references -f src/main.py -l 15 -c 8
 ```
 Array of `{ file, range }`. Empty array = no usages found.
 
+`references` is semantically accurate — it distinguishes symbols with the same
+name in different scopes. Prefer it over `grep` when checking blast radius
+before a rename or delete. See `slsp-vs-grep` for a detailed comparison.
+
 ### `completion` — completion suggestions
 ```
 slsp completion -f src/main.py -l 10 -c 5
@@ -76,6 +80,9 @@ Empty array = clean file. Each entry:
 `{ severity, message, range, source?, code? }`, with
 `severity` ∈ `error | warning | info | hint`.
 
+Run this after every code edit as the primary feedback loop. It catches type
+and semantic errors that text search cannot surface.
+
 Use `-w, --wait <ms>` to extend how long to wait for the first diagnostics
 batch (default 5000 ms). Slow servers (first-run Pyright) may need more.
 
@@ -84,7 +91,8 @@ batch (default 5000 ms). Slow servers (first-run Pyright) may need more.
 slsp symbols -f src/app.ts
 ```
 Tree of `{ name, kind, range, selectionRange, children? }`. Good first call
-on an unfamiliar file.
+on an unfamiliar file — gives a structured map of functions, classes, and
+their nested locals without reading the file line by line.
 
 ### `format` — formatting edits
 ```
