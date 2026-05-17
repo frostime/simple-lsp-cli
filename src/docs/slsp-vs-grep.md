@@ -57,9 +57,17 @@ point it before it can help. `rg` is the right tool for that initial discovery.
 `slsp` also has no view into Markdown, JSON, YAML, or any file type not
 supported by an LSP server. Use `rg` for those.
 
+Language servers differ. Before using semantic commands on an unfamiliar file,
+run `slsp servers -f <file> --format json`. If `result.commands.<command>` is
+`unsupported`, do not retry the same command; fall back to `rg`, `read`, or a
+supported semantic command.
+
 ## Recommended combined workflow
 
 ```bash
+# Step 0: inspect LSP availability for this file
+slsp servers -f src/core/client.ts --format json
+
 # Step 1: discover with rg
 rg "SiyuanClient" src
 

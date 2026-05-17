@@ -13,6 +13,8 @@
 - **Daemon 模式**：后台常驻进程，避免重复初始化，大幅加速连续调用
 - **全面 LSP 覆盖**：hover / definition / references / completion / diagnostics / symbols / rename / format / code-actions / signature-help / type-definition
 - **内建支持**：Python（Pyright）、TypeScript/JavaScript（typescript-language-server）
+- **项目配置**：通过 `slsp.config.json` 扩展或覆盖 LSP server
+- **能力发现**：`slsp servers -f <file>` 让 Agent 调用前知道哪些命令可用
 
 ## 前置要求
 
@@ -57,6 +59,7 @@ npm link
 ## 快速开始
 
 ```bash
+slsp servers -f src/main.py --format json       # 查看选中的 server 与能力
 slsp hover -f src/main.py -l 10 -c 5           # 类型 + 文档
 slsp definition -f src/app.ts -l 42 -c 12       # 跳转到定义
 slsp diagnostics -f src/main.py                  # 错误 / 警告
@@ -95,7 +98,8 @@ slsp rename -f src/main.py -l 5 -c 8 -n newFunc  # 重命名
 
 | 命令 | 说明 |
 |------|------|
-| `servers` | 列出语言服务器 |
+| `servers` | 列出已配置语言服务器 |
+| `servers -f <file>` | 查看选中的 server 与命令能力 |
 | `daemon start` | 启动后台 daemon |
 | `daemon stop` | 停止 daemon |
 | `daemon status` | daemon 状态 |
@@ -112,6 +116,54 @@ slsp rename -f src/main.py -l 5 -c 8 -n newFunc  # 重命名
 -w, --wait <ms>       诊断等待（默认 5000）
 -v, --verbose         输出 LSP 日志到 stderr
 ```
+
+## 项目配置
+
+在项目中添加 `slsp.config.json` 可支持新的 LSP server，或覆盖内建 server。
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/frostime/simple-lsp-cli/main/schema/slsp.schema.json",
+  "schemaVersion": "1.0",
+  "servers": {
+    "rust-analyzer": {
+      "name": "Rust Analyzer",
+      "command": "rust-analyzer",
+      "args": [],
+      "transport": "stdio",
+      "extensions": ["rs"],
+      "languageIds": { "rs": "rust" },
+      "rootMarkers": ["Cargo.toml"],
+      "initializationOptions": {},
+      "env": {}
+    }
+  },
+  "defaults": {
+    "rs": "rust-analyzer"
+  }
+}
+```
+
+规则：`schemaVersion` 必须是 `"1.0"`；用户 `servers[id]` 与内建同名时完整覆盖；错误配置会 fail-fast，并返回 `config_error`。
+
+## Agent-first 能力发现
+
+```bash
+slsp servers -f src/main.py --format json
+```
+
+```json
+{
+  "success": true,
+  "command": "servers",
+  "result": {
+    "selected": { "id": "pyright", "languageId": "python", "root": "/project" },
+    "commands": { "hover": "supported", "format": "unsupported", "diagnostics": "unknown" }
+  }
+}
+```
+
+Agent 应只调用 supported 命令。遇到 unsupported 时，回退到 `rg`/`read` 或其他 supported 语义命令。
 
 ## 输出格式
 

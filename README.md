@@ -13,6 +13,8 @@ A **lightweight** CLI tool for invoking [Language Server Protocol](https://micro
 - **Daemon mode**: Background persistent process, avoids repeated initialization, greatly speeds up consecutive calls
 - **Full LSP coverage**: hover / definition / references / completion / diagnostics / symbols / rename / format / code-actions / signature-help / type-definition
 - **Built-in support**: Python (Pyright), TypeScript/JavaScript (typescript-language-server)
+- **Project config**: Extend or override LSP servers with `slsp.config.json`
+- **Capability discovery**: `slsp servers -f <file>` tells Agents which commands are supported before calling them
 
 ## Prerequisites
 
@@ -57,6 +59,7 @@ npm link
 ## Quick Start
 
 ```bash
+slsp servers -f src/main.py --format json       # Inspect selected server + capabilities
 slsp hover -f src/main.py -l 10 -c 5           # Type info + docs
 slsp definition -f src/app.ts -l 42 -c 12       # Go to definition
 slsp diagnostics -f src/main.py                  # Errors / warnings
@@ -95,7 +98,8 @@ All positional arguments are **1-based**.
 
 | Command | Description |
 |---------|-------------|
-| `servers` | List language servers |
+| `servers` | List configured language servers |
+| `servers -f <file>` | Inspect selected server and command capabilities |
 | `daemon start` | Start background daemon |
 | `daemon stop` | Stop daemon |
 | `daemon status` | Daemon status |
@@ -112,6 +116,54 @@ All positional arguments are **1-based**.
 -w, --wait <ms>       Diagnostics wait time (default 5000)
 -v, --verbose         Output LSP logs to stderr
 ```
+
+## Project Configuration
+
+Add `slsp.config.json` to a project to support another LSP server or override a built-in one.
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/frostime/simple-lsp-cli/main/schema/slsp.schema.json",
+  "schemaVersion": "1.0",
+  "servers": {
+    "rust-analyzer": {
+      "name": "Rust Analyzer",
+      "command": "rust-analyzer",
+      "args": [],
+      "transport": "stdio",
+      "extensions": ["rs"],
+      "languageIds": { "rs": "rust" },
+      "rootMarkers": ["Cargo.toml"],
+      "initializationOptions": {},
+      "env": {}
+    }
+  },
+  "defaults": {
+    "rs": "rust-analyzer"
+  }
+}
+```
+
+Rules: `schemaVersion` must be `"1.0"`; user `servers[id]` fully overrides a built-in server with the same id; bad config fails fast with `config_error`.
+
+## Agent-first Capability Discovery
+
+```bash
+slsp servers -f src/main.py --format json
+```
+
+```json
+{
+  "success": true,
+  "command": "servers",
+  "result": {
+    "selected": { "id": "pyright", "languageId": "python", "root": "/project" },
+    "commands": { "hover": "supported", "format": "unsupported", "diagnostics": "unknown" }
+  }
+}
+```
+
+Agents should call supported commands only. If a command is unsupported, fall back to `rg`/`read` or another supported semantic command.
 
 ## Output Format
 

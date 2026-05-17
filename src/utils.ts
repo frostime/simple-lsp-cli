@@ -13,13 +13,19 @@ import { uriToPath } from "./lsp-client.js";
 
 // ─── Top-level output ─────────────────────────────────────────
 
+export interface StructuredError {
+  code: string;
+  message: string;
+  [key: string]: unknown;
+}
+
 export function jsonOutput(data: {
   success: boolean;
   command: string;
   file?: string;
   position?: { line: number; character: number };
   result?: unknown;
-  error?: string;
+  error?: string | StructuredError;
 }): string {
   return JSON.stringify(data, null, 1);
 }

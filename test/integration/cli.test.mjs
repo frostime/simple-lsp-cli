@@ -88,5 +88,5 @@ test("unsupported file types fail with structured JSON", () => {
 
   assert.equal(result.status, 1);
   assert.equal(result.json?.success, false);
-  assert.match(result.json?.error ?? "", /No server for \.txt files/);
+  assert.match(result.json?.error?.message ?? result.json?.error ?? "", /No server for \.txt files/);
 });
