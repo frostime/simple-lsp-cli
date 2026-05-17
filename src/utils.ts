@@ -25,7 +25,7 @@ export function jsonOutput(data: {
   file?: string;
   position?: { line: number; character: number };
   result?: unknown;
-  error?: string | StructuredError;
+  error?: StructuredError;
 }): string {
   return JSON.stringify(data, null, 1);
 }

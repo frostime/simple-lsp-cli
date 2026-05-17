@@ -147,18 +147,12 @@ function validateConfig(raw: unknown, configPath: string): SlspConfig {
     ? undefined
     : validateStringRecord(obj.defaults, "defaults", configPath);
 
-  const config: SlspConfig = {
+  return {
     ...(obj.$schema ? { $schema: obj.$schema as string } : {}),
     schemaVersion: CURRENT_CONFIG_SCHEMA_VERSION,
     ...(servers ? { servers } : {}),
     ...(defaults ? { defaults } : {}),
   };
-
-  const mergedRegistry = mergeServerRegistry(SERVER_REGISTRY, config);
-  const mergedDefaults = mergeDefaults(BUILTIN_DEFAULT_SERVERS, config);
-  validateDefaults(mergedDefaults, mergedRegistry, configPath);
-
-  return config;
 }
 
 function validateServers(raw: unknown, configPath: string): Record<string, ServerConfig> {
@@ -189,13 +183,25 @@ function validateServer(raw: unknown, label: string, configPath: string): Server
     }
   }
 
+  const languageIds = validateStringRecord(obj.languageIds, `${label}.languageIds`, configPath);
+  for (const ext of extensions) {
+    if (!(ext in languageIds)) {
+      throw new ConfigError(`${label}.languageIds must include extension: ${ext}`, undefined, configPath);
+    }
+  }
+  for (const ext of Object.keys(languageIds)) {
+    if (!extensions.includes(ext)) {
+      throw new ConfigError(`${label}.languageIds key is not in extensions: ${ext}`, undefined, configPath);
+    }
+  }
+
   return {
     name: obj.name === undefined ? command : expectString(obj.name, `${label}.name`, configPath),
     command,
     args,
     transport: "stdio",
     extensions,
-    languageIds: validateStringRecord(obj.languageIds, `${label}.languageIds`, configPath),
+    languageIds,
     ...(obj.rootMarkers === undefined ? {} : { rootMarkers: validateStringArray(obj.rootMarkers, `${label}.rootMarkers`, configPath) }),
     ...(obj.initializationOptions === undefined ? {} : { initializationOptions: expectObject(obj.initializationOptions, `${label}.initializationOptions`, configPath) }),
     ...(obj.env === undefined ? {} : { env: validateStringRecord(obj.env, `${label}.env`, configPath) }),

@@ -75,8 +75,14 @@ function outText(text: string) {
 }
 
 function die(cmd: string, error: string | StructuredError, file?: string): never {
-  out({ success: false, command: cmd, file, error });
+  out({ success: false, command: cmd, file, error: normalizeError(error) });
   process.exit(1);
+}
+
+function normalizeError(error: string | StructuredError): StructuredError {
+  return typeof error === "string"
+    ? { code: "command_error", message: error }
+    : error;
 }
 
 function dieConfig(cmd: string, err: ConfigError, file?: string): never {
@@ -111,7 +117,7 @@ function outputResult(args: {
 
 function requireFlag(flags: Record<string, string | boolean>, key: string, cmd: string): string {
   const val = flags[key];
-  if (!val || val === true) die(cmd, `Missing required option: --${key}`);
+  if (!val || val === true) die(cmd, { code: "missing_option", message: `Missing required option: --${key}` });
   return val as string;
 }
 
@@ -125,7 +131,7 @@ function numFlag(flags: Record<string, string | boolean>, key: string): number |
 function outputFormat(flags: Record<string, string | boolean>, cmd: string): string {
   const format = flags.format && flags.format !== true ? String(flags.format) : "text";
   if (format !== "text" && format !== "json") {
-    die(cmd, `Unsupported format: ${format}. Use --format text|json`);
+    die(cmd, { code: "invalid_format", message: `Unsupported format: ${format}. Use --format text|json` });
   }
   return format;
 }
@@ -158,14 +164,14 @@ function loadEffective(cmd: string, startPath: string, file?: string): Effective
 function resolveFileAndServer(flags: Record<string, string | boolean>, cmd: string) {
   const file = requireFlag(flags, "file", cmd);
   const filePath = path.resolve(file);
-  if (!fs.existsSync(filePath)) die(cmd, `File not found: ${filePath}`, filePath);
+  if (!fs.existsSync(filePath)) die(cmd, { code: "file_not_found", message: `File not found: ${filePath}` }, filePath);
 
   const effective = loadEffective(cmd, filePath, filePath);
   const ext = path.extname(filePath).slice(1).toLowerCase();
   const preferred = flags.server && flags.server !== true ? (flags.server as string) : undefined;
   const config = resolveServer(ext, preferred, effective.registry, effective.defaults);
   if (!config) {
-    die(cmd, `No server for .${ext} files. Supported: ${supportedExtensions(effective.registry)}`, filePath);
+    die(cmd, { code: "server_resolution_error", message: `No server for .${ext} files. Supported: ${supportedExtensions(effective.registry)}` }, filePath);
   }
 
   const serverName = preferred ?? findServerName(config, effective.registry);
@@ -459,29 +465,29 @@ async function main() {
     case "definition":
     case "references":
     case "completion":
-      if (!flags.line || !flags.col) die(command, "--line and --col are required");
+      if (!flags.line || !flags.col) die(command, { code: "missing_option", message: "--line and --col are required" });
       await exec(command, flags);
       break;
 
     case "type-definition":
-      if (!flags.line || !flags.col) die("typeDefinition", "--line and --col are required");
+      if (!flags.line || !flags.col) die("typeDefinition", { code: "missing_option", message: "--line and --col are required" });
       await exec("typeDefinition", flags);
       break;
 
     case "signature-help":
-      if (!flags.line || !flags.col) die("signatureHelp", "--line and --col are required");
+      if (!flags.line || !flags.col) die("signatureHelp", { code: "missing_option", message: "--line and --col are required" });
       await exec("signatureHelp", flags);
       break;
 
     case "rename": {
-      if (!flags.line || !flags.col) die("rename", "--line and --col are required");
+      if (!flags.line || !flags.col) die("rename", { code: "missing_option", message: "--line and --col are required" });
       const newName = requireFlag(flags, "new-name", "rename");
       await exec("rename", flags, { newName });
       break;
     }
 
     case "code-actions": {
-      if (!flags.line || !flags.col) die("codeActions", "--line and --col are required");
+      if (!flags.line || !flags.col) die("codeActions", { code: "missing_option", message: "--line and --col are required" });
       await exec("codeActions", flags, {
         endLine: numFlag(flags, "end-line"),
         endCol: numFlag(flags, "end-col"),
@@ -504,7 +510,7 @@ async function main() {
       break;
 
     default:
-      die(command, `Unknown command: ${command}. Run 'slsp --help' for usage.`);
+      die(command, { code: "unknown_command", message: `Unknown command: ${command}. Run 'slsp --help' for usage.` });
   }
 }
 
@@ -561,7 +567,7 @@ async function handleDaemon(sub: string | undefined, flags: Record<string, strin
       break;
     }
     default:
-      die("daemon", `Unknown subcommand: ${sub}. Use start|stop|status`);
+      die("daemon", { code: "unknown_subcommand", message: `Unknown subcommand: ${sub}. Use start|stop|status` });
   }
 }
 

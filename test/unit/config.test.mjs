@@ -72,3 +72,21 @@ test("extensions use dotless names", () => {
     (err) => err instanceof ConfigError && /must not start with/.test(err.message),
   );
 });
+
+test("server language ids must match configured extensions", () => {
+  writeJson(path.join(root, "slsp.config.json"), {
+    schemaVersion: "1.0",
+    servers: {
+      bad: {
+        command: "bad-lsp",
+        extensions: ["rs"],
+        languageIds: { py: "rust" },
+      },
+    },
+  });
+
+  assert.throws(
+    () => loadEffectiveConfig(root),
+    (err) => err instanceof ConfigError && /must include extension: rs/.test(err.message),
+  );
+});
