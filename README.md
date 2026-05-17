@@ -115,6 +115,10 @@ All positional arguments are **1-based**.
 -n, --new-name <name> New name (for rename)
 -w, --wait <ms>       Diagnostics wait time (default 5000)
 -v, --verbose         Output LSP logs to stderr
+-h, --help            Show help (use with a command for command help)
+-V, --version         Show version
+    --format <fmt>    Output format: text (default) or json
+    --no-daemon       Force inline mode (skip daemon)
 ```
 
 ## Project Configuration

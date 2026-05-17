@@ -11,6 +11,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { parseArgs as nodeParseArgs } from "node:util";
 import { LspClient } from "./lsp-client.js";
 import { resolveServer, findServerName, SERVER_REGISTRY, getLanguageId, type ServerConfig } from "./servers.js";
 import { startDaemon, isDaemonRunning, sendToDaemon, type DaemonRequest } from "./daemon.js";
@@ -25,43 +26,55 @@ interface ParsedArgs {
   flags: Record<string, string | boolean>;
 }
 
+const CLI_OPTIONS = {
+  file:       { type: "string" as const, short: "f" },
+  line:       { type: "string" as const, short: "l" },
+  col:        { type: "string" as const, short: "c" },
+  root:       { type: "string" as const, short: "r" },
+  server:     { type: "string" as const, short: "s" },
+  verbose:    { type: "boolean" as const, short: "v" },
+  "new-name": { type: "string" as const, short: "n" },
+  wait:       { type: "string" as const, short: "w" },
+  help:       { type: "boolean" as const, short: "h" },
+  version:    { type: "boolean" as const, short: "V" },
+  format:     { type: "string" as const },
+  "no-daemon": { type: "boolean" as const },
+  foreground: { type: "boolean" as const },
+  "end-line":  { type: "string" as const },
+  "end-col":   { type: "string" as const },
+};
+
 function parseArgs(argv: string[]): ParsedArgs {
   const args = argv.slice(2);
-  const flags: Record<string, string | boolean> = {};
-  let command = "";
-  let subcommand: string | undefined;
 
-  const FLAG_ALIASES: Record<string, string> = {
-    "-f": "--file",
-    "-l": "--line",
-    "-c": "--col",
-    "-r": "--root",
-    "-s": "--server",
-    "-v": "--verbose",
-    "-n": "--new-name",
-    "-w": "--wait",
-    "-h": "--help",
-  };
-
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    const resolved = FLAG_ALIASES[a] ?? a;
-
-    if (resolved.startsWith("--")) {
-      const key = resolved.slice(2);
-      const next = args[i + 1];
-      if (next && !next.startsWith("-")) {
-        flags[key] = next;
-        i++;
-      } else {
-        flags[key] = true;
-      }
-    } else if (!command) {
-      command = a;
-    } else if (!subcommand) {
-      subcommand = a;
-    }
+  let parsed: ReturnType<typeof nodeParseArgs>;
+  try {
+    parsed = nodeParseArgs({ args, options: CLI_OPTIONS, allowPositionals: true, strict: true });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const optMatch = msg.match(/Unknown option '([^']+)'/);
+    const option = optMatch ? optMatch[1] : undefined;
+    // Detect single-dash multi-char typo like "-verbose" → suggest "--verbose"
+    const badArg = option && option.length === 2 && !option.startsWith("--")
+      ? args.find(a => a.length > 2 && a.startsWith("-") && !a.startsWith("--"))
+      : undefined;
+    const hint = badArg ? ` Did you mean '--${badArg.slice(1)}'?` : "";
+    die("cli", {
+      code: "unknown_option",
+      message: option
+        ? `Unknown option: ${option}.${hint} Run 'slsp --help' for usage.`
+        : msg,
+    });
   }
+
+  const flags: Record<string, string | boolean> = {};
+  for (const [key, val] of Object.entries(parsed.values)) {
+    if (val !== undefined) flags[key] = val as string | boolean;
+  }
+
+  const positionals = parsed.positionals;
+  const command = positionals[0] ?? "";
+  const subcommand = positionals[1] ?? undefined;
 
   return { command, subcommand, flags };
 }
@@ -126,6 +139,14 @@ function numFlag(flags: Record<string, string | boolean>, key: string): number |
   if (v === undefined || v === true) return undefined;
   const n = parseInt(v as string, 10);
   return isNaN(n) ? undefined : n;
+}
+
+function requireNumFlag(flags: Record<string, string | boolean>, key: string, cmd: string): number {
+  const v = flags[key];
+  if (!v || v === true) die(cmd, { code: "missing_option", message: `Missing required option: --${key}` });
+  const n = parseInt(v as string, 10);
+  if (isNaN(n)) die(cmd, { code: "invalid_option", message: `--${key} must be a number, got: ${v}` });
+  return n;
 }
 
 function outputFormat(flags: Record<string, string | boolean>, cmd: string): string {
@@ -208,8 +229,8 @@ async function exec(
   const noDaemon = !!flags["no-daemon"];
   const format = outputFormat(flags, cmd);
 
-  const line = (numFlag(flags, "line") ?? 1) - 1;
-  const col = (numFlag(flags, "col") ?? 1) - 1;
+  const line = flags.line ? requireNumFlag(flags, "line", cmd) - 1 : 0;
+  const col = flags.col ? requireNumFlag(flags, "col", cmd) - 1 : 0;
 
   if (!noDaemon) {
     if (!isDaemonRunning()) {
@@ -434,7 +455,8 @@ OPTIONS:
   -v, --verbose           Log LSP traffic to stderr
   --format <text|json>    Output format (default: text)
   --no-daemon             Force inline mode (skip daemon)
-  -h, --help              Show this help
+  -h, --help              Show this help (use with a command for command help)
+  -V, --version           Show version
 
 CONFIG:
   slsp.config.json        Project-local server registry extension
@@ -451,12 +473,125 @@ ${buildDocsSection()}
 `.trim();
 }
 
+function buildVersion(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  for (const candidate of [path.join(here, "../package.json"), path.join(here, "../../package.json")]) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(candidate, "utf-8"));
+      if (pkg.version) return pkg.version;
+    } catch { /* next */ }
+  }
+  return "unknown";
+}
+
+const SUBCOMMAND_HELP: Record<string, string> = {
+  hover: `slsp hover -f <file> -l <line> -c <col> [options]
+
+  Show type information and documentation at cursor position.
+
+  Required: --file, --line, --col
+  Optional: --server, --root, --format, --no-daemon, --verbose`,
+
+  definition: `slsp definition -f <file> -l <line> -c <col> [options]
+
+  Go to definition of the symbol at cursor.
+
+  Required: --file, --line, --col
+  Optional: --server, --root, --format, --no-daemon, --verbose`,
+
+  "type-definition": `slsp type-definition -f <file> -l <line> -c <col> [options]
+
+  Go to type definition of the symbol at cursor.
+
+  Required: --file, --line, --col
+  Optional: --server, --root, --format, --no-daemon, --verbose`,
+
+  references: `slsp references -f <file> -l <line> -c <col> [options]
+
+  Find all references to the symbol at cursor.
+
+  Required: --file, --line, --col
+  Optional: --server, --root, --format, --no-daemon, --verbose`,
+
+  completion: `slsp completion -f <file> -l <line> -c <col> [options]
+
+  Get completion suggestions at cursor.
+
+  Required: --file, --line, --col
+  Optional: --server, --root, --format, --no-daemon, --verbose`,
+
+  "signature-help": `slsp signature-help -f <file> -l <line> -c <col> [options]
+
+  Get function signature info at a call site.
+
+  Required: --file, --line, --col
+  Optional: --server, --root, --format, --no-daemon, --verbose`,
+
+  rename: `slsp rename -f <file> -l <line> -c <col> -n <new-name> [options]
+
+  Preview rename edits (does not modify files).
+
+  Required: --file, --line, --col, --new-name
+  Optional: --server, --root, --format, --no-daemon, --verbose`,
+
+  "code-actions": `slsp code-actions -f <file> -l <line> -c <col> [options]
+
+  Get available code actions at cursor or range.
+
+  Required: --file, --line, --col
+  Optional: --end-line, --end-col, --server, --root, --format, --no-daemon, --verbose`,
+
+  diagnostics: `slsp diagnostics -f <file> [options]
+
+  Get errors, warnings, and hints for a file.
+
+  Required: --file
+  Optional: --wait, --server, --root, --format, --no-daemon, --verbose`,
+
+  symbols: `slsp symbols -f <file> [options]
+
+  List document symbols (functions, classes, etc.).
+
+  Required: --file
+  Optional: --server, --root, --format, --no-daemon, --verbose`,
+
+  format: `slsp format -f <file> [options]
+
+  Get formatting edits for a file.
+
+  Required: --file
+  Optional: --server, --root, --format, --no-daemon, --verbose`,
+
+  servers: `slsp servers [options]
+slsp servers -f <file> [options]
+
+  List configured servers, or inspect selected server and capabilities for a file.
+
+  Optional: --file, --format, --verbose`,
+
+  daemon: `slsp daemon <start|stop|status> [options]
+
+  Manage the background daemon process.
+
+  Subcommands: start, stop, status
+  Optional: --foreground (for start), --verbose, --format`,
+};
+
 async function main() {
   const parsed = parseArgs(process.argv);
   const { command, subcommand, flags } = parsed;
 
+  if (flags.version) {
+    console.log(buildVersion());
+    process.exit(0);
+  }
+
   if (!command || flags.help) {
-    console.log(buildHelp());
+    if (command && SUBCOMMAND_HELP[command]) {
+      console.log(SUBCOMMAND_HELP[command]);
+    } else {
+      console.log(buildHelp());
+    }
     process.exit(0);
   }
 

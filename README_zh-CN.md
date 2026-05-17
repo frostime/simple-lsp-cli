@@ -115,6 +115,10 @@ slsp rename -f src/main.py -l 5 -c 8 -n newFunc  # 重命名
 -n, --new-name <name> 新名称（rename 用）
 -w, --wait <ms>       诊断等待（默认 5000）
 -v, --verbose         输出 LSP 日志到 stderr
+-h, --help            显示帮助（配合命令名可查看子命令帮助）
+-V, --version         显示版本号
+    --format <fmt>    输出格式：text（默认）或 json
+    --no-daemon       强制内联模式（跳过 daemon）
 ```
 
 ## 项目配置

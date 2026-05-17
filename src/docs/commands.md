@@ -16,6 +16,8 @@ Shared flags:
 - `--format text|json` — output format (default `text`)
 - `--no-daemon` — bypass daemon, run inline
 - `-v, --verbose` — forward LSP stderr for debugging
+- `-h, --help` — show help; use with a command name for command-specific help
+- `-V, --version` — print version and exit
 
 ## Capability discovery
 
@@ -207,6 +209,7 @@ Common errors:
 - `File not found: <path>` — check the path; `slsp` requires it to exist.
 - `Missing required option: --<flag>` — position-based commands need both
   `--line` and `--col`.
+- `unknown_option` — unrecognized flag; check spelling.
 
 ## Daemon cheatsheet
 
