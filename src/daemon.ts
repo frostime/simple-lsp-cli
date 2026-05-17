@@ -13,6 +13,8 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { LspClient } from "./lsp-client.js";
 import { SERVER_REGISTRY, type ServerConfig } from "./servers.js";
+import { commandCapability, isCliCommand } from "./capabilities.js";
+import { type StructuredError } from "./utils.js";
 
 // ─── Paths ────────────────────────────────────────────────────
 
@@ -45,7 +47,7 @@ export interface DaemonRequest {
 export interface DaemonResponse {
   id: string;
   result?: unknown;
-  error?: { message: string };
+  error?: StructuredError;
 }
 
 // ─── Session Pool ─────────────────────────────────────────────
@@ -54,16 +56,16 @@ class SessionPool {
   private sessions = new Map<string, LspClient>();
   private starting = new Map<string, Promise<LspClient>>();
 
-  private key(server: string, root: string) {
-    return `${server}::${path.resolve(root)}`;
+  private key(server: string, root: string, fingerprint: string) {
+    return `${server}::${path.resolve(root)}::${fingerprint}`;
   }
 
-  async get(serverName: string, rootPath: string, verbose: boolean): Promise<LspClient> {
-    const k = this.key(serverName, rootPath);
+  async get(serverName: string, rootPath: string, verbose: boolean, serverConfig?: ServerConfig, fingerprint = "builtin"): Promise<LspClient> {
+    const k = this.key(serverName, rootPath, fingerprint);
     if (this.sessions.has(k)) return this.sessions.get(k)!;
     if (this.starting.has(k)) return this.starting.get(k)!;
 
-    const cfg = SERVER_REGISTRY[serverName];
+    const cfg = serverConfig ?? SERVER_REGISTRY[serverName];
     if (!cfg) throw new Error(`Unknown server: ${serverName}`);
 
     const promise = this.create(k, cfg, rootPath, verbose);
@@ -139,7 +141,7 @@ export async function startDaemon(verbose = false, idleTimeoutMs = 15 * 60 * 100
         }
         handleOne(pool, line.trim(), verbose, () => Date.now() - lastActivityTime).then(
           (resp) => socket.write(JSON.stringify(resp) + "\n"),
-          (err) => socket.write(JSON.stringify({ id: "?", error: { message: String(err) } }) + "\n")
+          (err) => socket.write(JSON.stringify({ id: "?", error: { code: "daemon_error", message: String(err) } }) + "\n")
         );
       }
     });
@@ -189,7 +191,7 @@ async function handleOne(
   getIdleMs: () => number
 ): Promise<DaemonResponse> {
   let req: DaemonRequest;
-  try { req = JSON.parse(raw); } catch { return { id: "?", error: { message: "Bad JSON" } }; }
+  try { req = JSON.parse(raw); } catch { return { id: "?", error: { code: "bad_json", message: "Bad JSON" } }; }
 
   try {
     const { method, params } = req;
@@ -211,13 +213,34 @@ async function handleOne(
     const serverName = params.server as string;
     const rootPath = params.root as string;
     if (!serverName || !rootPath) {
-      return { id: req.id, error: { message: "Missing 'server' or 'root'" } };
+      return { id: req.id, error: { code: "bad_request", message: "Missing 'server' or 'root'" } };
     }
 
-    const client = await pool.get(serverName, rootPath, verbose);
+    const client = await pool.get(
+      serverName,
+      rootPath,
+      verbose,
+      params.serverConfig as ServerConfig | undefined,
+      (params.configFingerprint as string | undefined) ?? "builtin"
+    );
     const file = params.file as string;
     const line = (params.line as number) ?? 0;
     const col = (params.character as number) ?? 0;
+
+    if (isCliCommand(method) && !client.supports(method)) {
+      return {
+        id: req.id,
+        error: {
+          code: "unsupported_capability",
+          message: `${method} is not supported by ${serverName}`,
+          server: serverName,
+          capability: commandCapability(method),
+          supportedCommands: Object.entries(client.supportedCommands())
+            .filter(([, support]) => support !== "unsupported")
+            .map(([command]) => command),
+        },
+      };
+    }
 
     let result: unknown;
     switch (method) {
@@ -239,12 +262,12 @@ async function handleOne(
         );
         break;
       default:
-        return { id: req.id, error: { message: `Unknown method: ${method}` } };
+        return { id: req.id, error: { code: "unknown_method", message: `Unknown method: ${method}` } };
     }
 
     return { id: req.id, result };
   } catch (err) {
-    return { id: req.id, error: { message: err instanceof Error ? err.message : String(err) } };
+    return { id: req.id, error: { code: "daemon_error", message: err instanceof Error ? err.message : String(err) } };
   }
 }
 

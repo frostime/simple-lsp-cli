@@ -9,13 +9,67 @@ Invocation: `slsp <command> [options]`
 
 Shared flags:
 
-- `-f, --file <path>` — target file (required for every command)
+- `-f, --file <path>` — target file
 - `-l, --line <n>` / `-c, --col <n>` — cursor position, **1-based**
 - `-r, --root <path>` — override project root (default: auto-detect)
-- `-s, --server <name>` — force backend: `pyright` | `pylsp` | `typescript`
+- `-s, --server <name>` — force backend server id
 - `--format text|json` — output format (default `text`)
 - `--no-daemon` — bypass daemon, run inline
 - `-v, --verbose` — forward LSP stderr for debugging
+
+## Capability discovery
+
+### `servers` — list configured servers
+
+```bash
+slsp servers --format json
+```
+
+Lists the effective server registry: built-in servers plus any project
+`slsp.config.json` entries found from the current directory.
+
+### `servers -f <file>` — inspect selected server and capabilities
+
+```bash
+slsp servers -f src/main.py --format json
+```
+
+Starts the selected language server, reads its initialize capabilities, and
+returns a command support matrix.
+
+```json
+{
+  "success": true,
+  "command": "servers",
+  "file": "/project/src/main.py",
+  "result": {
+    "selected": {
+      "id": "pyright",
+      "name": "Pyright",
+      "command": "pyright-langserver",
+      "args": ["--stdio"],
+      "root": "/project",
+      "languageId": "python",
+      "configPath": null
+    },
+    "commands": {
+      "hover": "supported",
+      "definition": "supported",
+      "typeDefinition": "supported",
+      "references": "supported",
+      "completion": "supported",
+      "signatureHelp": "supported",
+      "symbols": "supported",
+      "format": "unsupported",
+      "diagnostics": "unknown",
+      "rename": "supported",
+      "codeActions": "supported"
+    }
+  }
+}
+```
+
+Agents should use this before semantic calls on unfamiliar files.
 
 ## Position-based commands
 
@@ -84,7 +138,7 @@ Run this after every code edit as the primary feedback loop. It catches type
 and semantic errors that text search cannot surface.
 
 Use `-w, --wait <ms>` to extend how long to wait for the first diagnostics
-batch (default 5000 ms). Slow servers (first-run Pyright) may need more.
+batch (default 5000 ms). Slow servers may need more.
 
 ### `symbols` — hierarchical document symbols
 ```
@@ -98,21 +152,58 @@ their nested locals without reading the file line by line.
 ```
 slsp format -f src/main.py
 ```
-Returns `{ edits: [...] }`. **Pyright does not implement this** — switch to
-`--server pylsp` for Python if you need formatting.
+Returns `{ edits: [...] }`. Some servers do not implement formatting. Check
+`slsp servers -f <file> --format json` first.
+
+## Project config
+
+`slsp.config.json` extends or overrides the effective registry.
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/frostime/simple-lsp-cli/main/schema/slsp.schema.json",
+  "schemaVersion": "1.0",
+  "servers": {
+    "rust-analyzer": {
+      "name": "Rust Analyzer",
+      "command": "rust-analyzer",
+      "args": [],
+      "transport": "stdio",
+      "extensions": ["rs"],
+      "languageIds": { "rs": "rust" },
+      "rootMarkers": ["Cargo.toml"],
+      "initializationOptions": {},
+      "env": {}
+    }
+  },
+  "defaults": {
+    "rs": "rust-analyzer"
+  }
+}
+```
+
+Rules:
+
+- `schemaVersion` must be `"1.0"`.
+- User `servers[id]` fully overrides a built-in server with the same id.
+- `defaults` maps extension without dot to server id.
+- Bad config returns `config_error`; no silent fallback.
 
 ## Failure shape
 
-```
-{ "success": false, "command": "<cmd>", "file": "...", "error": "<message>" }
+```json
+{ "success": false, "command": "<cmd>", "file": "...", "error": { "code": "...", "message": "..." } }
 ```
 
-Common errors and what they mean:
+Common errors:
 
-- `ENOENT` / `Cannot start "..."` — language server binary missing; install
-  it (`npm i -g pyright` / `npm i -g typescript typescript-language-server`).
+- `config_error` — invalid `slsp.config.json`; fix config before retrying.
+- `unsupported_capability` — selected server does not support the command; use
+  `slsp servers -f <file> --format json` and choose a supported command.
+- `ENOENT` / `Cannot start "..."` — language server binary missing.
 - `timed out` — server hung. Retry; use `-v` to see its stderr.
-- `No server for .xxx files` — file extension not supported.
+- `No server for .xxx files` — file extension is not supported by built-in or
+  configured servers.
 - `File not found: <path>` — check the path; `slsp` requires it to exist.
 - `Missing required option: --<flag>` — position-based commands need both
   `--line` and `--col`.

@@ -12,12 +12,12 @@ import * as fs from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { LspClient } from "./lsp-client.js";
-import { resolveServer, findServerName, SERVER_REGISTRY } from "./servers.js";
+import { resolveServer, findServerName, SERVER_REGISTRY, getLanguageId, type ServerConfig } from "./servers.js";
 import { startDaemon, isDaemonRunning, sendToDaemon, type DaemonRequest } from "./daemon.js";
-import { simplify, jsonOutput } from "./utils.js";
+import { simplify, jsonOutput, type StructuredError } from "./utils.js";
 import { formatResultText } from "./format.js";
-
-// ─── Minimal arg parser ──────────────────────────────────────
+import { ConfigError, getRootMarkers, loadEffectiveConfig, type EffectiveConfig } from "./config.js";
+import { commandCapability, isCliCommand, type CliCommand } from "./capabilities.js";
 
 interface ParsedArgs {
   command: string;
@@ -66,8 +66,6 @@ function parseArgs(argv: string[]): ParsedArgs {
   return { command, subcommand, flags };
 }
 
-// ─── Helpers ──────────────────────────────────────────────────
-
 function out(data: Parameters<typeof jsonOutput>[0]) {
   process.stdout.write(jsonOutput(data) + "\n");
 }
@@ -76,9 +74,19 @@ function outText(text: string) {
   process.stdout.write(text.endsWith("\n") ? text : text + "\n");
 }
 
-function die(cmd: string, msg: string, file?: string): never {
-  out({ success: false, command: cmd, file, error: msg });
+function die(cmd: string, error: string | StructuredError, file?: string): never {
+  out({ success: false, command: cmd, file, error: normalizeError(error) });
   process.exit(1);
+}
+
+function normalizeError(error: string | StructuredError): StructuredError {
+  return typeof error === "string"
+    ? { code: "command_error", message: error }
+    : error;
+}
+
+function dieConfig(cmd: string, err: ConfigError, file?: string): never {
+  die(cmd, err.toJson(), file);
 }
 
 function outputResult(args: {
@@ -109,7 +117,7 @@ function outputResult(args: {
 
 function requireFlag(flags: Record<string, string | boolean>, key: string, cmd: string): string {
   const val = flags[key];
-  if (!val || val === true) die(cmd, `Missing required option: --${key}`);
+  if (!val || val === true) die(cmd, { code: "missing_option", message: `Missing required option: --${key}` });
   return val as string;
 }
 
@@ -120,14 +128,17 @@ function numFlag(flags: Record<string, string | boolean>, key: string): number |
   return isNaN(n) ? undefined : n;
 }
 
-function findProjectRoot(filePath: string): string {
+function outputFormat(flags: Record<string, string | boolean>, cmd: string): string {
+  const format = flags.format && flags.format !== true ? String(flags.format) : "text";
+  if (format !== "text" && format !== "json") {
+    die(cmd, { code: "invalid_format", message: `Unsupported format: ${format}. Use --format text|json` });
+  }
+  return format;
+}
+
+function findProjectRoot(filePath: string, markers: string[]): string {
   let dir = path.dirname(path.resolve(filePath));
   const root = path.parse(dir).root;
-  const markers = [
-    "package.json", "tsconfig.json", "pyproject.toml",
-    "setup.py", "setup.cfg", ".git", "Cargo.toml", "go.mod",
-    "pom.xml", "build.gradle",
-  ];
   while (dir !== root) {
     for (const m of markers) {
       if (fs.existsSync(path.join(dir, m))) return dir;
@@ -137,51 +148,73 @@ function findProjectRoot(filePath: string): string {
   return path.dirname(path.resolve(filePath));
 }
 
+function supportedExtensions(registry: Record<string, ServerConfig>): string {
+  return Array.from(new Set(Object.values(registry).flatMap((c) => c.extensions))).sort().join(", ");
+}
+
+function loadEffective(cmd: string, startPath: string, file?: string): EffectiveConfig {
+  try {
+    return loadEffectiveConfig(startPath);
+  } catch (err) {
+    if (err instanceof ConfigError) dieConfig(cmd, err, file);
+    throw err;
+  }
+}
+
 function resolveFileAndServer(flags: Record<string, string | boolean>, cmd: string) {
   const file = requireFlag(flags, "file", cmd);
   const filePath = path.resolve(file);
-  if (!fs.existsSync(filePath)) die(cmd, `File not found: ${filePath}`, filePath);
+  if (!fs.existsSync(filePath)) die(cmd, { code: "file_not_found", message: `File not found: ${filePath}` }, filePath);
 
+  const effective = loadEffective(cmd, filePath, filePath);
   const ext = path.extname(filePath).slice(1).toLowerCase();
   const preferred = flags.server && flags.server !== true ? (flags.server as string) : undefined;
-  const config = resolveServer(ext, preferred);
+  const config = resolveServer(ext, preferred, effective.registry, effective.defaults);
   if (!config) {
-    die(cmd, `No server for .${ext} files. Supported: py, ts, tsx, js, jsx, mjs, cjs`, filePath);
+    die(cmd, { code: "server_resolution_error", message: `No server for .${ext} files. Supported: ${supportedExtensions(effective.registry)}` }, filePath);
   }
 
-  const serverName = preferred ?? findServerName(config);
+  const serverName = preferred ?? findServerName(config, effective.registry);
   const rootPath = flags.root && flags.root !== true
     ? path.resolve(flags.root as string)
-    : findProjectRoot(filePath);
+    : findProjectRoot(filePath, getRootMarkers(config));
 
-  return { filePath, config, serverName, rootPath };
+  return { filePath, ext, config, serverName, rootPath, effective };
 }
 
-// ─── Command execution ───────────────────────────────────────
+function unsupportedError(args: {
+  command: CliCommand;
+  serverName: string;
+  client: LspClient;
+}): StructuredError {
+  return {
+    code: "unsupported_capability",
+    message: `${args.command} is not supported by ${args.serverName}`,
+    server: args.serverName,
+    capability: commandCapability(args.command),
+    supportedCommands: Object.entries(args.client.supportedCommands())
+      .filter(([, support]) => support !== "unsupported")
+      .map(([command]) => command),
+  };
+}
 
 async function exec(
-  cmd: string,
+  cmd: CliCommand,
   flags: Record<string, string | boolean>,
   extra?: Record<string, unknown>
 ) {
-  const { filePath, config, serverName, rootPath } = resolveFileAndServer(flags, cmd);
+  const { filePath, config, serverName, rootPath, effective } = resolveFileAndServer(flags, cmd);
   const verbose = !!flags.verbose;
   const noDaemon = !!flags["no-daemon"];
-  const format = flags.format && flags.format !== true ? String(flags.format) : "text";
-  if (format !== "text" && format !== "json") {
-    die(cmd, `Unsupported format: ${format}. Use --format text|json`, filePath);
-  }
+  const format = outputFormat(flags, cmd);
 
-  // Convert 1-based → 0-based
   const line = (numFlag(flags, "line") ?? 1) - 1;
   const col = (numFlag(flags, "col") ?? 1) - 1;
 
-  // Try daemon first (unless --no-daemon)
   if (!noDaemon) {
-    // Auto-start daemon if not running
     if (!isDaemonRunning()) {
       await startDaemonBackground(verbose);
-      await new Promise(r => setTimeout(r, 800)); // Wait for startup
+      await new Promise(r => setTimeout(r, 800));
     }
 
     if (isDaemonRunning()) {
@@ -189,10 +222,19 @@ async function exec(
         const req: DaemonRequest = {
           id: `${Date.now()}`,
           method: cmd,
-          params: { server: serverName, root: rootPath, file: filePath, line, character: col, ...extra },
+          params: {
+            server: serverName,
+            serverConfig: config,
+            root: rootPath,
+            configFingerprint: effective.fingerprint,
+            file: filePath,
+            line,
+            character: col,
+            ...extra,
+          },
         };
         const resp = await sendToDaemon(req);
-        if (resp.error) die(cmd, resp.error.message, filePath);
+        if (resp.error) die(cmd, resp.error, filePath);
         outputResult({
           format,
           command: cmd,
@@ -205,10 +247,10 @@ async function exec(
     }
   }
 
-  // Inline mode
   const client = new LspClient({ server: config, rootPath, verbose });
   try {
     await client.start();
+    if (!client.supports(cmd)) die(cmd, unsupportedError({ command: cmd, serverName, client }), filePath);
 
     let result: unknown;
     switch (cmd) {
@@ -220,12 +262,8 @@ async function exec(
       case "signatureHelp":  result = await client.signatureHelp(filePath, line, col); break;
       case "symbols":        result = await client.documentSymbols(filePath); break;
       case "format":         result = await client.formatting(filePath); break;
-      case "diagnostics":
-        result = await client.diagnostics(filePath, numFlag(flags, "wait") ?? 5000);
-        break;
-      case "rename":
-        result = await client.rename(filePath, line, col, extra?.newName as string);
-        break;
+      case "diagnostics":    result = await client.diagnostics(filePath, numFlag(flags, "wait") ?? 5000); break;
+      case "rename":         result = await client.rename(filePath, line, col, extra?.newName as string); break;
       case "codeActions":
         result = await client.codeActions(
           filePath, line, col,
@@ -233,8 +271,6 @@ async function exec(
           ((extra?.endCol as number) ?? col + 1) - 1
         );
         break;
-      default:
-        die(cmd, `Unknown command: ${cmd}`, filePath);
     }
 
     outputResult({
@@ -245,15 +281,67 @@ async function exec(
       result,
     });
   } catch (err) {
+    if (err instanceof ConfigError) dieConfig(cmd, err, filePath);
     die(cmd, err instanceof Error ? err.message : String(err), filePath);
   } finally {
     await client.stop();
   }
 }
 
-// ─── Help text ────────────────────────────────────────────────
+async function handleServers(flags: Record<string, string | boolean>) {
+  const format = outputFormat(flags, "servers");
+  const fileFlag = flags.file && flags.file !== true ? String(flags.file) : undefined;
 
-/** Very small YAML-frontmatter parser (key: value only; no nesting). */
+  if (!fileFlag) {
+    const effective = loadEffective("servers", process.cwd());
+    const result = Object.entries(effective.registry).map(([id, c]) => ({
+      id,
+      name: c.name,
+      command: c.command,
+      args: c.args,
+      extensions: c.extensions,
+      configPath: effective.configPath,
+    }));
+    if (format === "json") out({ success: true, command: "servers", result });
+    else outText(result.map((s) => `${s.id}\t${s.command} ${s.args.join(" ")}\t.${s.extensions.join(", .")}`).join("\n"));
+    return;
+  }
+
+  const { filePath, ext, config, serverName, rootPath, effective } = resolveFileAndServer(flags, "servers");
+  const verbose = !!flags.verbose;
+  const client = new LspClient({ server: config, rootPath, verbose });
+  try {
+    await client.start();
+    const result = {
+      selected: {
+        id: serverName,
+        name: config.name,
+        command: config.command,
+        args: config.args,
+        root: rootPath,
+        languageId: getLanguageId(config, ext),
+        configPath: effective.configPath ?? null,
+      },
+      commands: client.supportedCommands(),
+    };
+    if (format === "json") out({ success: true, command: "servers", file: filePath, result });
+    else {
+      outText([
+        `server: ${result.selected.id}`,
+        `root: ${result.selected.root}`,
+        `languageId: ${result.selected.languageId}`,
+        `config: ${result.selected.configPath ?? "(none)"}`,
+        ...Object.entries(result.commands).map(([cmdName, support]) => `${cmdName}: ${support}`),
+      ].join("\n"));
+    }
+  } catch (err) {
+    if (err instanceof ConfigError) dieConfig("servers", err, filePath);
+    die("servers", err instanceof Error ? err.message : String(err), filePath);
+  } finally {
+    await client.stop();
+  }
+}
+
 function parseFrontmatter(content: string): Record<string, string> {
   const m = content.match(/^---\s*\r?\n([\s\S]*?)\r?\n---/);
   if (!m) return {};
@@ -265,15 +353,12 @@ function parseFrontmatter(content: string): Record<string, string> {
   return out;
 }
 
-/** Locate the bundled docs directory.
- *  In a published install, cli.js lives at dist/cli.js and docs at dist/docs.
- *  When running straight from source (e.g. tsx src/cli.ts) fall back to src/docs. */
 function findDocsDir(): string | null {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    path.join(here, "docs"),                 // dist/docs (post-build)
-    path.resolve(here, "../src/docs"),       // running from dist, source still around
-    path.resolve(here, "../../src/docs"),    // defensive
+    path.join(here, "docs"),
+    path.resolve(here, "../src/docs"),
+    path.resolve(here, "../../src/docs"),
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
@@ -283,9 +368,7 @@ function findDocsDir(): string | null {
 
 function buildDocsSection(): string {
   const docsDir = findDocsDir();
-  if (!docsDir) {
-    return "  (bundled docs not found — reinstall the package to recover them)";
-  }
+  if (!docsDir) return "  (bundled docs not found — reinstall the package to recover them)";
   const files = fs.readdirSync(docsDir).filter((f) => f.endsWith(".md")).sort();
   if (files.length === 0) return `  (no docs found in ${docsDir})`;
 
@@ -338,16 +421,14 @@ MANAGEMENT:
   daemon stop        Stop daemon
   daemon status      Check daemon status (shows idle time)
   servers            List configured language servers
-
-NOTE: A daemon is auto-started on first LSP command and auto-stops
-      after 15 minutes of inactivity. Manual start/stop is optional.
+  servers -f <file>  Inspect selected server and command capabilities
 
 OPTIONS:
-  -f, --file <path>       Target file (required)
+  -f, --file <path>       Target file
   -l, --line <n>          Line number (1-based)
   -c, --col  <n>          Column number (1-based)
   -r, --root <path>       Project root (default: auto-detect)
-  -s, --server <name>     Force server (pyright|pylsp|typescript)
+  -s, --server <name>     Force server
   -n, --new-name <name>   New name (for rename)
   -w, --wait <ms>         Diagnostics wait time (default: 5000)
   -v, --verbose           Log LSP traffic to stderr
@@ -355,20 +436,20 @@ OPTIONS:
   --no-daemon             Force inline mode (skip daemon)
   -h, --help              Show this help
 
+CONFIG:
+  slsp.config.json        Project-local server registry extension
+
 EXAMPLES:
+  slsp servers -f src/main.py --format json
   slsp hover -f src/main.py -l 10 -c 5
   slsp diagnostics -f src/app.ts
   slsp definition -f lib/utils.js -l 42 -c 12
-  slsp symbols -f src/main.py
   slsp rename -f src/main.py -l 5 -c 8 --new-name newFunc
-  slsp daemon start && slsp hover -f src/main.py -l 10 -c 5
 
 AGENT DOCS:
 ${buildDocsSection()}
 `.trim();
 }
-
-// ─── Main ─────────────────────────────────────────────────────
 
 async function main() {
   const parsed = parseArgs(process.argv);
@@ -380,34 +461,33 @@ async function main() {
   }
 
   switch (command) {
-    // ── Position-based commands ──
     case "hover":
     case "definition":
     case "references":
     case "completion":
-      if (!flags.line || !flags.col) die(command, "--line and --col are required");
+      if (!flags.line || !flags.col) die(command, { code: "missing_option", message: "--line and --col are required" });
       await exec(command, flags);
       break;
 
     case "type-definition":
-      if (!flags.line || !flags.col) die("typeDefinition", "--line and --col are required");
+      if (!flags.line || !flags.col) die("typeDefinition", { code: "missing_option", message: "--line and --col are required" });
       await exec("typeDefinition", flags);
       break;
 
     case "signature-help":
-      if (!flags.line || !flags.col) die("signatureHelp", "--line and --col are required");
+      if (!flags.line || !flags.col) die("signatureHelp", { code: "missing_option", message: "--line and --col are required" });
       await exec("signatureHelp", flags);
       break;
 
     case "rename": {
-      if (!flags.line || !flags.col) die("rename", "--line and --col are required");
+      if (!flags.line || !flags.col) die("rename", { code: "missing_option", message: "--line and --col are required" });
       const newName = requireFlag(flags, "new-name", "rename");
       await exec("rename", flags, { newName });
       break;
     }
 
     case "code-actions": {
-      if (!flags.line || !flags.col) die("codeActions", "--line and --col are required");
+      if (!flags.line || !flags.col) die("codeActions", { code: "missing_option", message: "--line and --col are required" });
       await exec("codeActions", flags, {
         endLine: numFlag(flags, "end-line"),
         endCol: numFlag(flags, "end-col"),
@@ -415,34 +495,22 @@ async function main() {
       break;
     }
 
-    // ── File-based commands ──
     case "diagnostics":
     case "symbols":
     case "format":
       await exec(command, flags);
       break;
 
-    // ── Daemon ──
     case "daemon":
       await handleDaemon(subcommand, flags);
       break;
 
-    // ── Servers ──
     case "servers":
-      out({
-        success: true,
-        command: "servers",
-        result: Object.entries(SERVER_REGISTRY).map(([id, c]) => ({
-          id,
-          name: c.name,
-          command: c.command,
-          extensions: c.extensions,
-        })),
-      });
+      await handleServers(flags);
       break;
 
     default:
-      die(command, `Unknown command: ${command}. Run 'slsp --help' for usage.`);
+      die(command, { code: "unknown_command", message: `Unknown command: ${command}. Run 'slsp --help' for usage.` });
   }
 }
 
@@ -470,11 +538,7 @@ async function handleDaemon(sub: string | undefined, flags: Record<string, strin
         return;
       }
       const started = await startDaemonBackground(!!flags.verbose);
-      out({
-        success: started,
-        command: "daemon start",
-        result: { status: started ? "started" : "failed" },
-      });
+      out({ success: started, command: "daemon start", result: { status: started ? "started" : "failed" } });
       break;
     }
     case "stop":
@@ -503,12 +567,11 @@ async function handleDaemon(sub: string | undefined, flags: Record<string, strin
       break;
     }
     default:
-      die("daemon", `Unknown subcommand: ${sub}. Use start|stop|status`);
+      die("daemon", { code: "unknown_subcommand", message: `Unknown subcommand: ${sub}. Use start|stop|status` });
   }
 }
 
-// ─── Go ───────────────────────────────────────────────────────
-
 main().catch((err) => {
+  if (err instanceof ConfigError) dieConfig("cli", err);
   die("cli", err instanceof Error ? err.message : String(err));
 });

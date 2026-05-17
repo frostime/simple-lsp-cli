@@ -10,6 +10,7 @@ import * as fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { JsonRpcConnection } from "./jsonrpc.js";
 import { type ServerConfig, getLanguageId } from "./servers.js";
+import { commandSupport, listSupportedCommands, type CliCommand, type CommandSupport } from "./capabilities.js";
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -45,6 +46,7 @@ export class LspClient {
     { resolve: (d: LspDiagnostic[]) => void; timer: ReturnType<typeof setTimeout> }
   >();
   private openedFiles = new Set<string>();
+  private capabilities: Record<string, unknown> | null = null;
   private alive = false;
 
   constructor(private opts: LspClientOptions) {}
@@ -58,7 +60,7 @@ export class LspClient {
     this.proc = crossSpawn(server.command, server.args, {
       cwd: rootPath,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env },
+      env: { ...process.env, ...(server.env ?? {}) },
       windowsHide: true,
     });
 
@@ -151,9 +153,10 @@ export class LspClient {
       initializationOptions: this.opts.server.initializationOptions ?? {},
     })) as Record<string, unknown>;
 
+    this.capabilities = (result?.capabilities as Record<string, unknown> | undefined) ?? null;
     this.conn.sendNotification("initialized", {});
     this.alive = true;
-    this.log(`Server initialized (capabilities: ${Object.keys((result?.capabilities as object) ?? {}).length} items)`);
+    this.log(`Server initialized (capabilities: ${Object.keys(this.capabilities ?? {}).length} items)`);
   }
 
   async stop(): Promise<void> {
@@ -170,6 +173,24 @@ export class LspClient {
     this.conn.dispose();
     this.proc.kill();
     this.alive = false;
+  }
+
+  // ─── Capabilities ────────────────────────────────────────────
+
+  getCapabilities(): Record<string, unknown> | null {
+    return this.capabilities;
+  }
+
+  commandSupport(command: CliCommand): CommandSupport {
+    return commandSupport(command, this.capabilities);
+  }
+
+  supports(command: CliCommand): boolean {
+    return this.commandSupport(command) !== "unsupported";
+  }
+
+  supportedCommands(): Record<CliCommand, CommandSupport> {
+    return listSupportedCommands(this.capabilities);
   }
 
   // ─── File Management ────────────────────────────────────────
