@@ -235,4 +235,4 @@ CLI → Daemon(可选) → LspClient → JsonRpcConnection → Language Server (
 
 ## License
 
-MIT
+GPL-V3

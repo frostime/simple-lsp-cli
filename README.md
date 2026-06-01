@@ -234,4 +234,4 @@ CLI → Daemon(optional) → LspClient → JsonRpcConnection → Language Server
 
 ## License
 
-MIT
+GPL-V3
