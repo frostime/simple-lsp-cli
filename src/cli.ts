@@ -173,6 +173,11 @@ function supportedExtensions(registry: Record<string, ServerConfig>): string {
   return Array.from(new Set(Object.values(registry).flatMap((c) => c.extensions))).sort().join(", ");
 }
 
+function configPathText(effective: EffectiveConfig): string {
+  const paths = [effective.configPaths.global, effective.configPaths.project].filter(Boolean);
+  return paths.length ? paths.join(", ") : "(none)";
+}
+
 function loadEffective(cmd: string, startPath: string, file?: string): EffectiveConfig {
   try {
     return loadEffectiveConfig(startPath);
@@ -321,7 +326,7 @@ async function handleServers(flags: Record<string, string | boolean>) {
       command: c.command,
       args: c.args,
       extensions: c.extensions,
-      configPath: effective.configPath,
+      configPaths: effective.configPaths,
     }));
     if (format === "json") out({ success: true, command: "servers", result });
     else outText(result.map((s) => `${s.id}\t${s.command} ${s.args.join(" ")}\t.${s.extensions.join(", .")}`).join("\n"));
@@ -341,7 +346,7 @@ async function handleServers(flags: Record<string, string | boolean>) {
         args: config.args,
         root: rootPath,
         languageId: getLanguageId(config, ext),
-        configPath: effective.configPath ?? null,
+        configPaths: effective.configPaths,
       },
       commands: client.supportedCommands(),
     };
@@ -351,7 +356,7 @@ async function handleServers(flags: Record<string, string | boolean>) {
         `server: ${result.selected.id}`,
         `root: ${result.selected.root}`,
         `languageId: ${result.selected.languageId}`,
-        `config: ${result.selected.configPath ?? "(none)"}`,
+        `config: ${configPathText(effective)}`,
         ...Object.entries(result.commands).map(([cmdName, support]) => `${cmdName}: ${support}`),
       ].join("\n"));
     }
@@ -360,6 +365,51 @@ async function handleServers(flags: Record<string, string | boolean>) {
     die("servers", err instanceof Error ? err.message : String(err), filePath);
   } finally {
     await client.stop();
+  }
+}
+
+function handleConfig(flags: Record<string, string | boolean>) {
+  const format = outputFormat(flags, "config");
+  const effective = loadEffective("config", process.cwd());
+  const loaded = Object.entries(effective.configPaths).filter(([, value]) => !!value).map(([key]) => key);
+  const result = {
+    schemaVersion: "2.0",
+    paths: effective.configPaths,
+    loaded,
+    languages: Object.keys(effective.languages).length,
+    servers: Object.keys(effective.servers).length,
+  };
+
+  if (format === "json") out({ success: true, command: "config", result });
+  else outText([
+    `schemaVersion: ${result.schemaVersion}`,
+    `global: ${result.paths.global ?? "(none)"}`,
+    `project: ${result.paths.project ?? "(none)"}`,
+    `languages: ${result.languages}`,
+    `servers: ${result.servers}`,
+  ].join("\n"));
+}
+
+function handleLanguages(flags: Record<string, string | boolean>) {
+  const format = outputFormat(flags, "languages");
+  const effective = loadEffective("languages", process.cwd());
+  const result = Object.entries(effective.languages)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([id, language]) => ({
+      id,
+      languageId: language.languageId,
+      extensions: language.extensions,
+      servers: language.servers,
+      defaultServer: language.servers[0],
+    }));
+
+  if (format === "json") out({ success: true, command: "languages", result });
+  else {
+    const lines = ["language\tlanguageId\textensions\tservers"];
+    for (const language of result) {
+      lines.push(`${language.id}\t${language.languageId}\t${language.extensions.join(",")}\t${language.servers.join(",")}`);
+    }
+    outText(lines.join("\n"));
   }
 }
 
@@ -443,6 +493,8 @@ MANAGEMENT:
   daemon status      Check daemon status (shows idle time)
   servers            List configured language servers
   servers -f <file>  Inspect selected server and command capabilities
+  config             Show loaded config paths and summary
+  languages          List configured languages and LSP mappings
 
 OPTIONS:
   -f, --file <path>       Target file
@@ -459,7 +511,8 @@ OPTIONS:
   -V, --version           Show version
 
 CONFIG:
-  slsp.config.json        Project-local server registry extension
+  ~/.config/simple-lsp-cli/slsp.config.json  User-level config
+  slsp.config.json                          Project-local config
 
 EXAMPLES:
   slsp servers -f src/main.py --format json
@@ -569,6 +622,18 @@ slsp servers -f <file> [options]
 
   Optional: --file, --format, --verbose`,
 
+  config: `slsp config [options]
+
+  Show loaded config paths and effective config summary.
+
+  Optional: --format`,
+
+  languages: `slsp languages [options]
+
+  List configured languages, file extensions, language IDs, and candidate servers.
+
+  Optional: --format`,
+
   daemon: `slsp daemon <start|stop|status> [options]
 
   Manage the background daemon process.
@@ -642,6 +707,14 @@ async function main() {
 
     case "servers":
       await handleServers(flags);
+      break;
+
+    case "config":
+      handleConfig(flags);
+      break;
+
+    case "languages":
+      handleLanguages(flags);
       break;
 
     default:

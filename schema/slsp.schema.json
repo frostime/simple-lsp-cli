@@ -10,13 +10,16 @@
       "type": "string"
     },
     "schemaVersion": {
-      "const": "1.0"
+      "enum": ["1.0", "2.0"]
     },
-    "servers": {
+    "languages": {
       "type": "object",
       "additionalProperties": {
-        "$ref": "#/$defs/server"
+        "$ref": "#/$defs/language"
       }
+    },
+    "servers": {
+      "type": "object"
     },
     "defaults": {
       "type": "object",
@@ -29,8 +32,113 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": { "const": "1.0" }
+        }
+      },
+      "then": {
+        "properties": {
+          "servers": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/$defs/serverV1" }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": { "const": "2.0" }
+        }
+      },
+      "then": {
+        "properties": {
+          "servers": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/$defs/serverV2" }
+          }
+        },
+        "not": {
+          "required": ["defaults"]
+        }
+      }
+    }
+  ],
   "$defs": {
-    "server": {
+    "language": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["extensions", "languageId", "servers"],
+      "properties": {
+        "extensions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^.].*$"
+          }
+        },
+        "languageId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "servers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "serverV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "transport": {
+          "const": "stdio",
+          "default": "stdio"
+        },
+        "rootMarkers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "initializationOptions": {
+          "type": "object"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "serverV1": {
       "type": "object",
       "additionalProperties": false,
       "required": ["command", "extensions", "languageIds"],

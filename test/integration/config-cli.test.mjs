@@ -74,6 +74,20 @@ test.after(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+function runCliWithGlobalConfig(args) {
+  const configHome = path.join(root, "xdg-cli");
+  writeFixture(path.join(configHome, "simple-lsp-cli/slsp.config.json"), JSON.stringify({
+    schemaVersion: "2.0",
+    languages: {
+      fake: { extensions: ["fake"], languageId: "fake", servers: ["fake"] },
+    },
+    servers: {
+      fake: { command: process.execPath, args: [fakeServer] },
+    },
+  }, null, 2));
+  return runCli(args, { env: { ...process.env, XDG_CONFIG_HOME: configHome } });
+}
+
 test("servers -f reports the selected configured server and command capabilities", () => {
   const result = runCli(["servers", "-f", file, "--format", "json"]);
 
@@ -110,4 +124,26 @@ test("invalid project config returns config_error", () => {
   assert.equal(result.json?.success, false);
   assert.equal(result.json?.error?.code, "config_error");
   assert.match(result.json?.error?.message, /unknown server/);
+});
+
+test("config reports global config path and effective summary", () => {
+  const result = runCliWithGlobalConfig(["config", "--format", "json"]);
+
+  assert.equal(result.status, 0);
+  assert.equal(result.json?.success, true);
+  assert.equal(result.json?.result?.schemaVersion, "2.0");
+  assert.equal(result.json?.result?.loaded?.includes("global"), true);
+  assert.equal(typeof result.json?.result?.languages, "number");
+  assert.equal(typeof result.json?.result?.servers, "number");
+});
+
+test("languages lists configured language mappings", () => {
+  const result = runCliWithGlobalConfig(["languages", "--format", "json"]);
+
+  assert.equal(result.status, 0);
+  assert.equal(result.json?.success, true);
+  const fake = result.json?.result?.find((language) => language.id === "fake");
+  assert.deepEqual(fake?.extensions, ["fake"]);
+  assert.equal(fake?.languageId, "fake");
+  assert.deepEqual(fake?.servers, ["fake"]);
 });

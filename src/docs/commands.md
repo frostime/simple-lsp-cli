@@ -27,8 +27,8 @@ Shared flags:
 slsp servers --format json
 ```
 
-Lists the effective server registry: built-in servers plus any project
-`slsp.config.json` entries found from the current directory.
+Lists the effective server registry: built-in servers plus global and project
+`slsp.config.json` entries.
 
 ### `servers -f <file>` — inspect selected server and capabilities
 
@@ -52,7 +52,7 @@ returns a command support matrix.
       "args": ["--stdio"],
       "root": "/project",
       "languageId": "python",
-      "configPath": null
+      "configPaths": {}
     },
     "commands": {
       "hover": "supported",
@@ -72,6 +72,25 @@ returns a command support matrix.
 ```
 
 Agents should use this before semantic calls on unfamiliar files.
+
+### `languages` — list configured languages
+
+```bash
+slsp languages --format json
+```
+
+Returns language keys, file extensions, LSP `languageId`, candidate servers,
+and the default server. Use this to discover supported languages without
+starting an LSP process.
+
+### `config` — show loaded config layers
+
+```bash
+slsp config --format json
+```
+
+Reports effective `schemaVersion`, loaded global/project config paths, and
+language/server counts.
 
 ## Position-based commands
 
@@ -157,38 +176,53 @@ slsp format -f src/main.py
 Returns `{ edits: [...] }`. Some servers do not implement formatting. Check
 `slsp servers -f <file> --format json` first.
 
-## Project config
+## Config
 
-`slsp.config.json` extends or overrides the effective registry.
+Config layers are merged in order:
+
+```text
+built-in < ~/.config/simple-lsp-cli/slsp.config.json < project slsp.config.json
+```
+
+Current config is language-first:
 
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/frostime/simple-lsp-cli/main/schema/slsp.schema.json",
-  "schemaVersion": "1.0",
+  "schemaVersion": "2.0",
+  "languages": {
+    "latex": {
+      "extensions": ["tex", "cls", "sty"],
+      "languageId": "latex",
+      "servers": ["texlab"]
+    },
+    "bibtex": {
+      "extensions": ["bib"],
+      "languageId": "bibtex",
+      "servers": ["texlab"]
+    }
+  },
   "servers": {
-    "rust-analyzer": {
-      "name": "Rust Analyzer",
-      "command": "rust-analyzer",
+    "texlab": {
+      "name": "TexLab",
+      "command": "texlab",
       "args": [],
       "transport": "stdio",
-      "extensions": ["rs"],
-      "languageIds": { "rs": "rust" },
-      "rootMarkers": ["Cargo.toml"],
+      "rootMarkers": [".latexmkrc", "Tectonic.toml", ".git"],
       "initializationOptions": {},
       "env": {}
     }
-  },
-  "defaults": {
-    "rs": "rust-analyzer"
   }
 }
 ```
 
 Rules:
 
-- `schemaVersion` must be `"1.0"`.
-- User `servers[id]` fully overrides a built-in server with the same id.
-- `defaults` maps extension without dot to server id.
+- `schemaVersion` should be `"2.0"`; `"1.0"` configs are migrated in memory.
+- `languages` owns extension recognition and LSP `languageId`.
+- `languages.*.servers` is ordered; the first server is default.
+- `servers` owns process launch options only.
+- User `languages[id]` / `servers[id]` replace built-in entries with the same id.
 - Bad config returns `config_error`; no silent fallback.
 
 ## Failure shape

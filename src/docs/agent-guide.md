@@ -10,8 +10,8 @@ understand code precisely (types, definitions, references, diagnostics)
 instead of guessing from raw text.
 
 Built-in files: Python (`.py`, `.pyi`), TypeScript/JavaScript
-(`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`). Projects can add more servers
-with `slsp.config.json`.
+(`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`), and Rust (`.rs`). Users and
+projects can add more languages with `slsp.config.json`.
 
 ## Prerequisites (user machine)
 
@@ -21,6 +21,7 @@ At least one LSP server must be installed:
 npm install -g pyright                                 # Python
 npm install -g typescript typescript-language-server   # TS/JS
 pip install python-lsp-server                          # optional Python alternative
+rustup component add rust-analyzer                     # Rust
 ```
 
 If a command fails with `ENOENT` / `Cannot start "..."`, the corresponding
@@ -49,7 +50,7 @@ command, `rg`, or `read`.
       "name": "Pyright",
       "root": "/project",
       "languageId": "python",
-      "configPath": null
+      "configPaths": {}
     },
     "commands": {
       "hover": "supported",
@@ -68,6 +69,8 @@ usually safe to try `diagnostics`.
 
 | Goal | Command |
 |---|---|
+| Inspect configured languages | `languages` |
+| Inspect loaded config layers | `config` |
 | Inspect available backend and capabilities | `servers -f <file>` |
 | Confirm a symbol's type / docs | `hover` |
 | Jump to where something is defined | `definition` / `type-definition` |
@@ -116,35 +119,45 @@ slsp references -f src/foo.ts -l 42 -c 10 --format json
 slsp diagnostics -f src/foo.ts --format json
 ```
 
-## Project config
+## Config
 
-Use `slsp.config.json` to add or override language servers for a project:
+Use `slsp.config.json` to add or override languages and language servers.
+Global config is loaded from `~/.config/simple-lsp-cli/slsp.config.json` (or
+`$XDG_CONFIG_HOME/simple-lsp-cli/slsp.config.json`) before project config.
 
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/frostime/simple-lsp-cli/main/schema/slsp.schema.json",
-  "schemaVersion": "1.0",
+  "schemaVersion": "2.0",
+  "languages": {
+    "latex": {
+      "extensions": ["tex", "cls", "sty"],
+      "languageId": "latex",
+      "servers": ["texlab"]
+    },
+    "bibtex": {
+      "extensions": ["bib"],
+      "languageId": "bibtex",
+      "servers": ["texlab"]
+    }
+  },
   "servers": {
-    "rust-analyzer": {
-      "name": "Rust Analyzer",
-      "command": "rust-analyzer",
+    "texlab": {
+      "name": "TexLab",
+      "command": "texlab",
       "args": [],
       "transport": "stdio",
-      "extensions": ["rs"],
-      "languageIds": { "rs": "rust" },
-      "rootMarkers": ["Cargo.toml"],
+      "rootMarkers": [".latexmkrc", "Tectonic.toml", ".git"],
       "initializationOptions": {},
       "env": {}
     }
-  },
-  "defaults": {
-    "rs": "rust-analyzer"
   }
 }
 ```
 
 Config errors are fail-fast. If `slsp.config.json` is invalid, fix it before
-calling semantic commands.
+calling semantic commands. Run `slsp languages --format json` to inspect the
+effective language mapping.
 
 ## Output shape (JSON mode)
 

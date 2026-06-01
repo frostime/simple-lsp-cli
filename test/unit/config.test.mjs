@@ -41,6 +41,82 @@ test("project config can add a language server and make it the default for an ex
 
   assert.equal(effective.registry["rust-analyzer"].command, "rust-analyzer");
   assert.equal(effective.defaults.rs, "rust-analyzer");
+  assert.equal(effective.languages.rust.languageId, "rust");
+});
+
+test("built-in Rust support selects rust-analyzer for rs files", () => {
+  const effective = loadEffectiveConfig(root);
+
+  assert.equal(effective.languages.rust.languageId, "rust");
+  assert.deepEqual(effective.languages.rust.extensions, ["rs"]);
+  assert.equal(effective.defaults.rs, "rust-analyzer");
+  assert.equal(effective.registry["rust-analyzer"].command, "rust-analyzer");
+});
+
+test("v2 project config defines language-first custom server", () => {
+  writeJson(path.join(root, "slsp.config.json"), {
+    schemaVersion: "2.0",
+    languages: {
+      latex: {
+        extensions: ["tex", "cls", "sty"],
+        languageId: "latex",
+        servers: ["texlab"],
+      },
+      bibtex: {
+        extensions: ["bib"],
+        languageId: "bibtex",
+        servers: ["texlab"],
+      },
+    },
+    servers: {
+      texlab: {
+        command: "texlab",
+        args: [],
+        rootMarkers: [".latexmkrc"],
+      },
+    },
+  });
+
+  const effective = loadEffectiveConfig(root);
+
+  assert.equal(effective.languages.latex.languageId, "latex");
+  assert.deepEqual(effective.languages.latex.servers, ["texlab"]);
+  assert.equal(effective.defaults.tex, "texlab");
+  assert.equal(effective.registry.texlab.languageIds.tex, "latex");
+  assert.equal(effective.registry.texlab.languageIds.bib, "bibtex");
+});
+
+test("global config is loaded before project config", () => {
+  const oldXdg = process.env.XDG_CONFIG_HOME;
+  const configHome = path.join(root, "xdg");
+  process.env.XDG_CONFIG_HOME = configHome;
+  try {
+    writeJson(path.join(configHome, "simple-lsp-cli/slsp.config.json"), {
+      schemaVersion: "2.0",
+      languages: {
+        fake: { extensions: ["fake"], languageId: "fake", servers: ["global-fake"] },
+      },
+      servers: {
+        "global-fake": { command: "global-fake-lsp" },
+      },
+    });
+    writeJson(path.join(root, "slsp.config.json"), {
+      schemaVersion: "2.0",
+      servers: {
+        "global-fake": { command: "project-fake-lsp" },
+      },
+    });
+
+    const effective = loadEffectiveConfig(root);
+
+    assert.equal(effective.configPaths.global, path.join(configHome, "simple-lsp-cli/slsp.config.json"));
+    assert.equal(effective.configPaths.project, path.join(root, "slsp.config.json"));
+    assert.equal(effective.registry["global-fake"].command, "project-fake-lsp");
+    assert.equal(effective.defaults.fake, "global-fake");
+  } finally {
+    if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = oldXdg;
+  }
 });
 
 test("bad defaults fail fast instead of silently falling back", () => {

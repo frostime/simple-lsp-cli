@@ -12,8 +12,8 @@ A **lightweight** CLI tool for invoking [Language Server Protocol](https://micro
 - **Auto-detection**: Automatically selects the language server based on file extension
 - **Daemon mode**: Background persistent process, avoids repeated initialization, greatly speeds up consecutive calls
 - **Full LSP coverage**: hover / definition / references / completion / diagnostics / symbols / rename / format / code-actions / signature-help / type-definition
-- **Built-in support**: Python (Pyright), TypeScript/JavaScript (typescript-language-server)
-- **Project config**: Extend or override LSP servers with `slsp.config.json`
+- **Built-in support**: Python (Pyright), TypeScript/JavaScript (typescript-language-server), Rust (rust-analyzer)
+- **User/project config**: Add language-first LSP mappings with `slsp.config.json`
 - **Capability discovery**: `slsp servers -f <file>` tells Agents which commands are supported before calling them
 
 ## Prerequisites
@@ -30,6 +30,9 @@ npm install -g typescript typescript-language-server
 
 # Or pylsp for Python
 pip install python-lsp-server
+
+# Rust
+rustup component add rust-analyzer
 ```
 
 ## Installation
@@ -100,6 +103,8 @@ All positional arguments are **1-based**.
 |---------|-------------|
 | `servers` | List configured language servers |
 | `servers -f <file>` | Inspect selected server and command capabilities |
+| `languages` | List configured languages, extensions, and candidate servers |
+| `config` | Show loaded config layers and effective config summary |
 | `daemon start` | Start background daemon |
 | `daemon stop` | Stop daemon |
 | `daemon status` | Daemon status |
@@ -111,7 +116,7 @@ All positional arguments are **1-based**.
 -l, --line <n>        Line number (1-based)
 -c, --col  <n>        Column number (1-based)
 -r, --root <path>     Project root (auto-detected by default)
--s, --server <name>   Force server (pyright|pylsp|typescript)
+-s, --server <name>   Force server (pyright|pylsp|typescript|rust-analyzer)
 -n, --new-name <name> New name (for rename)
 -w, --wait <ms>       Diagnostics wait time (default 5000)
 -v, --verbose         Output LSP logs to stderr
@@ -121,34 +126,41 @@ All positional arguments are **1-based**.
     --no-daemon       Force inline mode (skip daemon)
 ```
 
-## Project Configuration
+## Configuration
 
-Add `slsp.config.json` to a project to support another LSP server or override a built-in one.
+Add `slsp.config.json` globally at `~/.config/simple-lsp-cli/slsp.config.json` (or `$XDG_CONFIG_HOME/simple-lsp-cli/slsp.config.json`) or in a project. Merge order is `built-in < global < project`.
 
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/frostime/simple-lsp-cli/main/schema/slsp.schema.json",
-  "schemaVersion": "1.0",
+  "schemaVersion": "2.0",
+  "languages": {
+    "latex": {
+      "extensions": ["tex", "cls", "sty"],
+      "languageId": "latex",
+      "servers": ["texlab"]
+    },
+    "bibtex": {
+      "extensions": ["bib"],
+      "languageId": "bibtex",
+      "servers": ["texlab"]
+    }
+  },
   "servers": {
-    "rust-analyzer": {
-      "name": "Rust Analyzer",
-      "command": "rust-analyzer",
+    "texlab": {
+      "name": "TexLab",
+      "command": "texlab",
       "args": [],
       "transport": "stdio",
-      "extensions": ["rs"],
-      "languageIds": { "rs": "rust" },
-      "rootMarkers": ["Cargo.toml"],
+      "rootMarkers": [".latexmkrc", "Tectonic.toml", ".git"],
       "initializationOptions": {},
       "env": {}
     }
-  },
-  "defaults": {
-    "rs": "rust-analyzer"
   }
 }
 ```
 
-Rules: `schemaVersion` must be `"1.0"`; user `servers[id]` fully overrides a built-in server with the same id; bad config fails fast with `config_error`.
+Rules: `schemaVersion` should be `"2.0"`; v1 configs are migrated in memory; `languages.*.servers[0]` is the default server; bad config fails fast with `config_error`.
 
 ## Agent-first Capability Discovery
 
