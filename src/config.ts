@@ -264,7 +264,7 @@ function migrateTo2_0(data: Record<string, unknown>, configPath: string): Record
   }
 
   for (const [ext, serverId] of Object.entries(v1.defaults ?? {})) {
-    const server = v1.servers?.[serverId];
+    const server = v1.servers?.[serverId] ?? SERVER_REGISTRY[serverId];
     if (!server) {
       throw new ConfigError(`defaults.${ext} references unknown server: ${serverId}`, undefined, configPath);
     }
@@ -277,13 +277,14 @@ function migrateTo2_0(data: Record<string, unknown>, configPath: string): Record
     for (const ext of server.extensions) {
       const selected = v1.defaults?.[ext] ?? singleCandidate(ext, extCandidates.get(ext) ?? [], configPath);
       if (selected !== serverId) continue;
-      const languageId = server.languageIds[ext] ?? ext;
-      const languageKey = languageId;
-      const language = languages[languageKey] ?? { extensions: [], languageId, servers: [] };
-      if (!language.extensions.includes(ext)) language.extensions.push(ext);
-      if (!language.servers.includes(serverId)) language.servers.push(serverId);
-      languages[languageKey] = language;
+      addMigratedLanguage(languages, server.languageIds[ext] ?? ext, ext, serverId);
     }
+  }
+
+  for (const [ext, serverId] of Object.entries(v1.defaults ?? {})) {
+    if (v1.servers?.[serverId]) continue;
+    const server = SERVER_REGISTRY[serverId];
+    addMigratedLanguage(languages, server.languageIds[ext] ?? ext, ext, serverId, `${server.languageIds[ext] ?? ext}-${ext}`);
   }
 
   return {
@@ -292,6 +293,20 @@ function migrateTo2_0(data: Record<string, unknown>, configPath: string): Record
     ...(Object.keys(languages).length ? { languages } : {}),
     ...(Object.keys(servers).length ? { servers } : {}),
   };
+}
+
+function addMigratedLanguage(
+  languages: Record<string, LanguageConfig>,
+  languageId: string,
+  ext: string,
+  serverId: string,
+  preferredKey = languageId
+): void {
+  const languageKey = languages[preferredKey] ? `${preferredKey}-${ext}` : preferredKey;
+  const language = languages[languageKey] ?? { extensions: [], languageId, servers: [] };
+  if (!language.extensions.includes(ext)) language.extensions.push(ext);
+  if (!language.servers.includes(serverId)) language.servers.push(serverId);
+  languages[languageKey] = language;
 }
 
 function singleCandidate(ext: string, candidates: string[], configPath: string): string {
@@ -313,6 +328,13 @@ function validateConfig(raw: unknown, configPath: string): SlspConfig {
 
   if (obj.$schema !== undefined && typeof obj.$schema !== "string") {
     throw new ConfigError("$schema must be a string", undefined, configPath);
+  }
+
+  const allowedKeys = new Set(["$schema", "schemaVersion", "languages", "servers"]);
+  for (const key of Object.keys(obj)) {
+    if (!allowedKeys.has(key)) {
+      throw new ConfigError(`Unsupported config field for schemaVersion 2.0: ${key}`, undefined, configPath);
+    }
   }
 
   const servers = obj.servers === undefined

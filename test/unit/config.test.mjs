@@ -6,6 +6,7 @@ import path from "node:path";
 import { loadEffectiveConfig, ConfigError } from "../../dist/config.js";
 
 const root = path.resolve("temp/test-config");
+const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
 
 function resetDir() {
   fs.rmSync(root, { recursive: true, force: true });
@@ -17,8 +18,15 @@ function writeJson(file, value) {
   fs.writeFileSync(file, JSON.stringify(value, null, 2), "utf8");
 }
 
-test.beforeEach(resetDir);
-test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+test.beforeEach(() => {
+  resetDir();
+  process.env.XDG_CONFIG_HOME = path.join(root, "empty-xdg");
+});
+test.after(() => {
+  if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+  else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
+  fs.rmSync(root, { recursive: true, force: true });
+});
 
 test("project config can add a language server and make it the default for an extension", () => {
   const file = path.join(root, "src/main.rs");
@@ -51,6 +59,19 @@ test("built-in Rust support selects rust-analyzer for rs files", () => {
   assert.deepEqual(effective.languages.rust.extensions, ["rs"]);
   assert.equal(effective.defaults.rs, "rust-analyzer");
   assert.equal(effective.registry["rust-analyzer"].command, "rust-analyzer");
+});
+
+test("v1 defaults can select a built-in server without redefining it", () => {
+  writeJson(path.join(root, "slsp.config.json"), {
+    schemaVersion: "1.0",
+    defaults: { py: "pylsp" },
+  });
+
+  const effective = loadEffectiveConfig(root);
+
+  assert.equal(effective.defaults.py, "pylsp");
+  assert.equal(effective.defaults.pyi, "pyright");
+  assert.equal(effective.registry.pylsp.command, "pylsp");
 });
 
 test("v2 project config defines language-first custom server", () => {
@@ -117,6 +138,18 @@ test("global config is loaded before project config", () => {
     if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = oldXdg;
   }
+});
+
+test("v2 rejects legacy defaults instead of silently ignoring them", () => {
+  writeJson(path.join(root, "slsp.config.json"), {
+    schemaVersion: "2.0",
+    defaults: { py: "pylsp" },
+  });
+
+  assert.throws(
+    () => loadEffectiveConfig(root),
+    (err) => err instanceof ConfigError && /Unsupported config field/.test(err.message),
+  );
 });
 
 test("bad defaults fail fast instead of silently falling back", () => {
