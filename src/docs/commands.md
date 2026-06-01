@@ -1,6 +1,6 @@
 ---
 name: slsp-commands
-description: Per-command reference for slsp — flags, JSON result shapes, failure modes. Read after slsp-agent-guide.
+description: Per-command reference for slsp — flags, JSON result shapes, failure modes. Read after slsp-use-guide.
 ---
 
 # slsp Command Reference
@@ -176,54 +176,13 @@ slsp format -f src/main.py
 Returns `{ edits: [...] }`. Some servers do not implement formatting. Check
 `slsp servers -f <file> --format json` first.
 
-## Config
+## Related docs
 
-Config layers are merged in order:
-
-```text
-built-in < ~/.config/simple-lsp-cli/slsp.config.json < project slsp.config.json
-```
-
-Current config is language-first:
-
-```json
-{
-  "$schema": "https://raw.githubusercontent.com/frostime/simple-lsp-cli/main/schema/slsp.schema.json",
-  "schemaVersion": "2.0",
-  "languages": {
-    "latex": {
-      "extensions": ["tex", "cls", "sty"],
-      "languageId": "latex",
-      "servers": ["texlab"]
-    },
-    "bibtex": {
-      "extensions": ["bib"],
-      "languageId": "bibtex",
-      "servers": ["texlab"]
-    }
-  },
-  "servers": {
-    "texlab": {
-      "name": "TexLab",
-      "command": "texlab",
-      "args": [],
-      "transport": "stdio",
-      "rootMarkers": [".latexmkrc", "Tectonic.toml", ".git"],
-      "initializationOptions": {},
-      "env": {}
-    }
-  }
-}
-```
-
-Rules:
-
-- `schemaVersion` should be `"2.0"`; `"1.0"` configs are migrated in memory.
-- `languages` owns extension recognition and LSP `languageId`.
-- `languages.*.servers` is ordered; the first server is default.
-- `servers` owns process launch options only.
-- User `languages[id]` / `servers[id]` replace built-in entries with the same id.
-- Bad config returns `config_error`; no silent fallback.
+| Need | Read |
+|---|---|
+| Operating workflow | `slsp-use-guide` |
+| Configure languages and servers | `slsp-config` |
+| Choose between LSP and text search | `slsp-vs-grep` |
 
 ## Failure shape
 

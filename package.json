@@ -35,7 +35,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc && node -e \"import('node:fs').then(fs => { const docsSrc = 'src/docs'; const docsDst = 'dist/docs'; if (!fs.existsSync(docsSrc)) { console.error('Missing required docs directory: ' + docsSrc); process.exit(1); } fs.mkdirSync('dist', { recursive: true }); fs.cpSync(docsSrc, docsDst, { recursive: true }); if (fs.existsSync('schema')) fs.cpSync('schema', 'dist/schema', { recursive: true }); })\"",
+    "build": "tsc && node -e \"import('node:fs').then(fs => { const docsSrc = 'src/docs'; const docsDst = 'dist/docs'; if (!fs.existsSync(docsSrc)) { console.error('Missing required docs directory: ' + docsSrc); process.exit(1); } fs.mkdirSync('dist', { recursive: true }); fs.rmSync(docsDst, { recursive: true, force: true }); fs.cpSync(docsSrc, docsDst, { recursive: true }); if (fs.existsSync('schema')) fs.cpSync('schema', 'dist/schema', { recursive: true }); })\"",
     "dev": "tsc --watch",
     "clean": "node -e \"import('node:fs').then(fs => fs.rmSync('dist', { recursive: true, force: true }))\"",
     "pretest": "npm run build",
