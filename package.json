@@ -1,6 +1,6 @@
 {
   "name": "simple-lsp-cli",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "Agent-friendly CLI for invoking Language Server Protocol (LSP) methods",
   "license": "AGPL-3.0-only",
   "author": "frostime",
@@ -35,7 +35,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc && node -e \"import('node:fs').then(fs => { const docsSrc = 'src/docs'; const docsDst = 'dist/docs'; if (!fs.existsSync(docsSrc)) { console.error('Missing required docs directory: ' + docsSrc); process.exit(1); } fs.mkdirSync('dist', { recursive: true }); fs.cpSync(docsSrc, docsDst, { recursive: true }); if (fs.existsSync('schema')) fs.cpSync('schema', 'dist/schema', { recursive: true }); })\"",
+    "build": "node scripts/build.js",
     "dev": "tsc --watch",
     "clean": "node -e \"import('node:fs').then(fs => fs.rmSync('dist', { recursive: true, force: true }))\"",
     "pretest": "npm run build",

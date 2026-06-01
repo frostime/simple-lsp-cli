@@ -12,10 +12,16 @@ export function writeFixture(filePath, content) {
 }
 
 export function runCli(args, options = {}) {
+  const { env, ...spawnOptions } = options;
   const result = spawnSync(process.execPath, ["dist/cli.js", ...args], {
     cwd: path.resolve("."),
     encoding: "utf8",
-    ...options,
+    env: {
+      ...process.env,
+      XDG_CONFIG_HOME: path.resolve("temp/test-empty-xdg-cli"),
+      ...env,
+    },
+    ...spawnOptions,
   });
 
   const stdout = result.stdout.trim();

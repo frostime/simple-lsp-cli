@@ -1,11 +1,12 @@
 ---
 name: slsp-vs-grep
-description: When to use slsp vs grep/rg — tool choice, strengths, and a recommended combined workflow for AI agents.
+description: Decide when to use slsp's LSP bridge vs grep/rg text search. Read after slsp-use-guide when choosing a code navigation strategy.
 ---
 
 # slsp vs grep/rg
 
-`grep` / `rg` and `slsp` solve different problems. Use both.
+`grep` / `rg` and LSP solve different problems. `slsp` is the CLI bridge to
+LSP servers; use both.
 
 ## Division of responsibility
 

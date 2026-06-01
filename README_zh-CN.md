@@ -12,8 +12,8 @@
 - **自动检测**：根据文件扩展名自动选择语言服务器
 - **Daemon 模式**：后台常驻进程，避免重复初始化，大幅加速连续调用
 - **全面 LSP 覆盖**：hover / definition / references / completion / diagnostics / symbols / rename / format / code-actions / signature-help / type-definition
-- **内建支持**：Python（Pyright）、TypeScript/JavaScript（typescript-language-server）
-- **项目配置**：通过 `slsp.config.json` 扩展或覆盖 LSP server
+- **内建支持**：Python（Pyright）、TypeScript/JavaScript（typescript-language-server）、Rust（rust-analyzer）
+- **用户/项目配置**：通过 `slsp.config.json` 增加 language-first LSP 映射
 - **能力发现**：`slsp servers -f <file>` 让 Agent 调用前知道哪些命令可用
 
 ## 前置要求
@@ -30,6 +30,9 @@ npm install -g typescript typescript-language-server
 
 # 或者 Python 用 pylsp
 pip install python-lsp-server
+
+# Rust
+rustup component add rust-analyzer
 ```
 
 ## 安装
@@ -100,6 +103,8 @@ slsp rename -f src/main.py -l 5 -c 8 -n newFunc  # 重命名
 |------|------|
 | `servers` | 列出已配置语言服务器 |
 | `servers -f <file>` | 查看选中的 server 与命令能力 |
+| `languages` | 列出已配置语言、扩展名和候选 server |
+| `config` | 查看加载的配置层和有效配置摘要 |
 | `daemon start` | 启动后台 daemon |
 | `daemon stop` | 停止 daemon |
 | `daemon status` | daemon 状态 |
@@ -111,7 +116,7 @@ slsp rename -f src/main.py -l 5 -c 8 -n newFunc  # 重命名
 -l, --line <n>        行号（1-based）
 -c, --col  <n>        列号（1-based）
 -r, --root <path>     项目根目录（默认自动检测）
--s, --server <name>   强制服务器（pyright|pylsp|typescript）
+-s, --server <name>   强制服务器（pyright|pylsp|typescript|rust-analyzer）
 -n, --new-name <name> 新名称（rename 用）
 -w, --wait <ms>       诊断等待（默认 5000）
 -v, --verbose         输出 LSP 日志到 stderr
@@ -121,34 +126,41 @@ slsp rename -f src/main.py -l 5 -c 8 -n newFunc  # 重命名
     --no-daemon       强制内联模式（跳过 daemon）
 ```
 
-## 项目配置
+## 配置
 
-在项目中添加 `slsp.config.json` 可支持新的 LSP server，或覆盖内建 server。
+可以在全局 `~/.config/simple-lsp-cli/slsp.config.json`（或 `$XDG_CONFIG_HOME/simple-lsp-cli/slsp.config.json`）或项目中添加 `slsp.config.json`。合并顺序是 `built-in < global < project`。
 
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/frostime/simple-lsp-cli/main/schema/slsp.schema.json",
-  "schemaVersion": "1.0",
+  "schemaVersion": "2.0",
+  "languages": {
+    "latex": {
+      "extensions": ["tex", "cls", "sty"],
+      "languageId": "latex",
+      "servers": ["texlab"]
+    },
+    "bibtex": {
+      "extensions": ["bib"],
+      "languageId": "bibtex",
+      "servers": ["texlab"]
+    }
+  },
   "servers": {
-    "rust-analyzer": {
-      "name": "Rust Analyzer",
-      "command": "rust-analyzer",
+    "texlab": {
+      "name": "TexLab",
+      "command": "texlab",
       "args": [],
       "transport": "stdio",
-      "extensions": ["rs"],
-      "languageIds": { "rs": "rust" },
-      "rootMarkers": ["Cargo.toml"],
+      "rootMarkers": [".latexmkrc", "Tectonic.toml", ".git"],
       "initializationOptions": {},
       "env": {}
     }
-  },
-  "defaults": {
-    "rs": "rust-analyzer"
   }
 }
 ```
 
-规则：`schemaVersion` 必须是 `"1.0"`；用户 `servers[id]` 与内建同名时完整覆盖；错误配置会 fail-fast，并返回 `config_error`。
+规则：`schemaVersion` 推荐为 `"2.0"`；v1 配置会在内存中迁移；`languages.*.servers[0]` 是默认 server；错误配置会 fail-fast，并返回 `config_error`。
 
 ## Agent-first 能力发现
 
@@ -223,4 +235,4 @@ CLI → Daemon(可选) → LspClient → JsonRpcConnection → Language Server (
 
 ## License
 
-MIT
+GPL-V3

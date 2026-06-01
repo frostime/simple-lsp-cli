@@ -1,6 +1,6 @@
 ---
 name: slsp-commands
-description: Per-command reference for slsp — flags, JSON result shapes, failure modes. Read after slsp-agent-guide.
+description: Per-command reference for slsp — flags, JSON result shapes, failure modes. Read after slsp-use-guide.
 ---
 
 # slsp Command Reference
@@ -27,8 +27,8 @@ Shared flags:
 slsp servers --format json
 ```
 
-Lists the effective server registry: built-in servers plus any project
-`slsp.config.json` entries found from the current directory.
+Lists the effective server registry: built-in servers plus global and project
+`slsp.config.json` entries.
 
 ### `servers -f <file>` — inspect selected server and capabilities
 
@@ -52,7 +52,7 @@ returns a command support matrix.
       "args": ["--stdio"],
       "root": "/project",
       "languageId": "python",
-      "configPath": null
+      "configPaths": {}
     },
     "commands": {
       "hover": "supported",
@@ -72,6 +72,25 @@ returns a command support matrix.
 ```
 
 Agents should use this before semantic calls on unfamiliar files.
+
+### `languages` — list configured languages
+
+```bash
+slsp languages --format json
+```
+
+Returns language keys, file extensions, LSP `languageId`, candidate servers,
+and the default server. Use this to discover supported languages without
+starting an LSP process.
+
+### `config` — show loaded config layers
+
+```bash
+slsp config --format json
+```
+
+Reports effective `schemaVersion`, loaded global/project config paths, and
+language/server counts.
 
 ## Position-based commands
 
@@ -157,39 +176,13 @@ slsp format -f src/main.py
 Returns `{ edits: [...] }`. Some servers do not implement formatting. Check
 `slsp servers -f <file> --format json` first.
 
-## Project config
+## Related docs
 
-`slsp.config.json` extends or overrides the effective registry.
-
-```json
-{
-  "$schema": "https://raw.githubusercontent.com/frostime/simple-lsp-cli/main/schema/slsp.schema.json",
-  "schemaVersion": "1.0",
-  "servers": {
-    "rust-analyzer": {
-      "name": "Rust Analyzer",
-      "command": "rust-analyzer",
-      "args": [],
-      "transport": "stdio",
-      "extensions": ["rs"],
-      "languageIds": { "rs": "rust" },
-      "rootMarkers": ["Cargo.toml"],
-      "initializationOptions": {},
-      "env": {}
-    }
-  },
-  "defaults": {
-    "rs": "rust-analyzer"
-  }
-}
-```
-
-Rules:
-
-- `schemaVersion` must be `"1.0"`.
-- User `servers[id]` fully overrides a built-in server with the same id.
-- `defaults` maps extension without dot to server id.
-- Bad config returns `config_error`; no silent fallback.
+| Need | Read |
+|---|---|
+| Operating workflow | `slsp-use-guide` |
+| Configure languages and servers | `slsp-config` |
+| Choose between LSP and text search | `slsp-vs-grep` |
 
 ## Failure shape
 

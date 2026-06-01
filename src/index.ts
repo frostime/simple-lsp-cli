@@ -1,11 +1,11 @@
 export { LspClient, pathToUri, uriToPath } from "./lsp-client.js";
 export type { LspClientOptions } from "./lsp-client.js";
-export { SERVER_REGISTRY, BUILTIN_DEFAULT_SERVERS, BUILTIN_ROOT_MARKERS, resolveServer, findServerName, getLanguageId } from "./servers.js";
-export type { ServerConfig } from "./servers.js";
+export { LANGUAGE_REGISTRY, SERVER_DEFINITIONS, SERVER_REGISTRY, BUILTIN_DEFAULT_SERVERS, BUILTIN_ROOT_MARKERS, buildRuntimeRegistry, resolveServer, findServerName, getLanguageId } from "./servers.js";
+export type { LanguageConfig, ServerDefinition, ServerConfig } from "./servers.js";
 export { simplify, jsonOutput } from "./utils.js";
 export type { StructuredError } from "./utils.js";
-export { CONFIG_FILE_NAME, CURRENT_CONFIG_SCHEMA_VERSION, ConfigError, findConfig, loadSlspConfig, loadEffectiveConfig, mergeServerRegistry, mergeDefaults, getRootMarkers } from "./config.js";
-export type { SlspConfig, LoadedSlspConfig, EffectiveConfig } from "./config.js";
+export { CONFIG_FILE_NAME, CURRENT_CONFIG_SCHEMA_VERSION, ConfigError, findConfig, findGlobalConfig, loadSlspConfig, loadGlobalSlspConfig, loadEffectiveConfig, mergeServerRegistry, mergeDefaults, mergeLanguages, mergeServerDefinitions, buildDefaults, getRootMarkers } from "./config.js";
+export type { SlspConfig, SlspConfigV1, LoadedSlspConfig, EffectiveConfig } from "./config.js";
 export { CLI_COMMANDS, COMMAND_CAPABILITIES, commandCapability, commandSupport, supportsCommand, listSupportedCommands, isCliCommand } from "./capabilities.js";
 export type { CliCommand, CommandSupport } from "./capabilities.js";
 export { formatResultText } from "./format.js";

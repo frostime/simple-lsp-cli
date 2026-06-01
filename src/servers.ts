@@ -1,28 +1,68 @@
 /**
- * Language server configurations.
- * Each entry defines how to launch a specific LSP server.
+ * Language and language server configurations.
  */
 
-export interface ServerConfig {
+export interface LanguageConfig {
+  extensions: string[];
+  languageId: string;
+  servers: string[];
+}
+
+export interface ServerDefinition {
   name: string;
   command: string;
   args: string[];
   transport?: "stdio";
-  extensions: string[];
-  languageIds: Record<string, string>;
   rootMarkers?: string[];
   initializationOptions?: Record<string, unknown>;
   env?: Record<string, string>;
 }
 
-export const SERVER_REGISTRY: Record<string, ServerConfig> = {
+/** Runtime server config used by the LSP client. */
+export interface ServerConfig extends ServerDefinition {
+  extensions: string[];
+  languageIds: Record<string, string>;
+}
+
+export const LANGUAGE_REGISTRY: Record<string, LanguageConfig> = {
+  python: {
+    extensions: ["py", "pyi"],
+    languageId: "python",
+    servers: ["pyright", "pylsp"],
+  },
+  typescript: {
+    extensions: ["ts"],
+    languageId: "typescript",
+    servers: ["typescript"],
+  },
+  typescriptreact: {
+    extensions: ["tsx"],
+    languageId: "typescriptreact",
+    servers: ["typescript"],
+  },
+  javascript: {
+    extensions: ["js", "mjs", "cjs"],
+    languageId: "javascript",
+    servers: ["typescript"],
+  },
+  javascriptreact: {
+    extensions: ["jsx"],
+    languageId: "javascriptreact",
+    servers: ["typescript"],
+  },
+  rust: {
+    extensions: ["rs"],
+    languageId: "rust",
+    servers: ["rust-analyzer"],
+  },
+};
+
+export const SERVER_DEFINITIONS: Record<string, ServerDefinition> = {
   pyright: {
     name: "Pyright",
     command: "pyright-langserver",
     args: ["--stdio"],
     transport: "stdio",
-    extensions: ["py", "pyi"],
-    languageIds: { py: "python", pyi: "python" },
     rootMarkers: ["pyproject.toml", "setup.py", "setup.cfg"],
   },
   pylsp: {
@@ -30,8 +70,6 @@ export const SERVER_REGISTRY: Record<string, ServerConfig> = {
     command: "pylsp",
     args: [],
     transport: "stdio",
-    extensions: ["py", "pyi"],
-    languageIds: { py: "python", pyi: "python" },
     rootMarkers: ["pyproject.toml", "setup.py", "setup.cfg"],
   },
   typescript: {
@@ -39,35 +77,54 @@ export const SERVER_REGISTRY: Record<string, ServerConfig> = {
     command: "typescript-language-server",
     args: ["--stdio"],
     transport: "stdio",
-    extensions: ["ts", "tsx", "js", "jsx", "mjs", "cjs"],
-    languageIds: {
-      ts: "typescript",
-      tsx: "typescriptreact",
-      js: "javascript",
-      jsx: "javascriptreact",
-      mjs: "javascript",
-      cjs: "javascript",
-    },
     rootMarkers: ["package.json", "tsconfig.json"],
   },
-};
-
-export const BUILTIN_DEFAULT_SERVERS: Record<string, string> = {
-  py: "pyright",
-  pyi: "pyright",
-  ts: "typescript",
-  tsx: "typescript",
-  js: "typescript",
-  jsx: "typescript",
-  mjs: "typescript",
-  cjs: "typescript",
+  "rust-analyzer": {
+    name: "Rust Analyzer",
+    command: "rust-analyzer",
+    args: [],
+    transport: "stdio",
+    rootMarkers: ["Cargo.toml", "rust-project.json"],
+  },
 };
 
 export const BUILTIN_ROOT_MARKERS = [
   "package.json", "tsconfig.json", "pyproject.toml",
-  "setup.py", "setup.cfg", ".git", "Cargo.toml", "go.mod",
+  "setup.py", "setup.cfg", ".git", "Cargo.toml", "rust-project.json", "go.mod",
   "pom.xml", "build.gradle",
 ];
+
+export function buildRuntimeRegistry(
+  servers: Record<string, ServerDefinition>,
+  languages: Record<string, LanguageConfig>
+): Record<string, ServerConfig> {
+  const registry: Record<string, ServerConfig> = {};
+
+  for (const [id, server] of Object.entries(servers)) {
+    registry[id] = { ...server, args: server.args ?? [], transport: "stdio", extensions: [], languageIds: {} };
+  }
+
+  for (const language of Object.values(languages)) {
+    for (const serverId of language.servers) {
+      const server = registry[serverId];
+      if (!server) continue;
+      for (const ext of language.extensions) {
+        if (!server.extensions.includes(ext)) server.extensions.push(ext);
+        server.languageIds[ext] = language.languageId;
+      }
+    }
+  }
+
+  return registry;
+}
+
+export const SERVER_REGISTRY: Record<string, ServerConfig> = buildRuntimeRegistry(SERVER_DEFINITIONS, LANGUAGE_REGISTRY);
+
+export const BUILTIN_DEFAULT_SERVERS: Record<string, string> = Object.fromEntries(
+  Object.values(LANGUAGE_REGISTRY).flatMap((language) =>
+    language.extensions.map((ext) => [ext, language.servers[0]])
+  )
+);
 
 /** Resolve the best server config for a file extension. */
 export function resolveServer(
