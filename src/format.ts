@@ -205,13 +205,22 @@ function formatSignatureHelp(value: unknown): string {
   return lines.join("\n");
 }
 
-function formatEdits(label: string, value: unknown): string {
+function editLine(edit: EditLike, defaultFile?: string): string {
+  return `${displayPath(edit.file ?? defaultFile)} ${formatRange(edit.range)} -> ${JSON.stringify(edit.newText ?? "")}`;
+}
+
+function editsFrom(value: unknown): EditLike[] {
+  if (Array.isArray(value)) return value as EditLike[];
   const editContainer = (value ?? {}) as WorkspaceEditLike;
-  const edits = editContainer.edits ?? [];
+  return editContainer.edits ?? [];
+}
+
+function formatEdits(label: string, value: unknown, defaultFile?: string): string {
+  const edits = editsFrom(value);
   if (edits.length === 0) return `0 ${label}`;
   return [
     `${edits.length} ${label}`,
-    ...edits.map((edit) => `${displayPath(edit.file)} ${formatRange(edit.range)} -> ${JSON.stringify(shortText(edit.newText, 80))}`),
+    ...edits.map((edit) => editLine(edit, defaultFile)),
   ].join("\n");
 }
 
@@ -220,13 +229,15 @@ function formatCodeActions(value: unknown): string {
   if (actions.length === 0) return "0 code actions";
   return [
     `${actions.length} code actions`,
-    ...actions.map((action, index) => {
+    ...actions.flatMap((action, index) => {
       const extras: string[] = [];
       if (action.kind) extras.push(action.kind);
       if (action.isPreferred) extras.push("preferred");
-      const editCount = action.edit?.edits?.length;
-      if (editCount) extras.push(`${editCount} edits`);
-      return `${index + 1}. ${action.title ?? "(untitled action)"}${extras.length ? ` [${extras.join(", ")}]` : ""}`;
+      const edits = editsFrom(action.edit);
+      if (edits.length) extras.push(`${edits.length} edits`);
+      const lines = [`${index + 1}. ${action.title ?? "(untitled action)"}${extras.length ? ` [${extras.join(", ")}]` : ""}`];
+      lines.push(...edits.map((edit) => `   ${editLine(edit)}`));
+      return lines;
     }),
   ].join("\n");
 }
@@ -257,9 +268,9 @@ export function formatResultText(args: {
     case "diagnostics":
       return formatDiagnostics(file, result);
     case "format":
-      return formatEdits("edits", result);
+      return formatEdits("edits", result, file);
     case "rename":
-      return formatEdits("rename edits", result);
+      return formatEdits("rename edits", result, file);
     case "codeActions":
       return formatCodeActions(result);
     default:

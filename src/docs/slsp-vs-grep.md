@@ -56,12 +56,11 @@ Returns exactly the two locations that refer to *that* function:
 point it before it can help. `rg` is the right tool for that initial discovery.
 
 `slsp` also has no view into Markdown, JSON, YAML, or any file type not
-supported by an LSP server. Use `rg` for those.
+supported by an LSP server. `rg` is the right tool for those files.
 
 Language servers differ. Before using semantic commands on an unfamiliar file,
 run `slsp servers -f <file> --format json`. If `result.commands.<command>` is
-`unsupported`, do not retry the same command; fall back to `rg`, `read`, or a
-supported semantic command.
+`unsupported`, switch to `rg`, `read`, or another supported semantic command.
 
 ## Recommended combined workflow
 
@@ -73,17 +72,17 @@ slsp servers -f src/core/client.ts --format json
 rg "SiyuanClient" src
 
 # Step 2: map the file you care about
-slsp symbols -f src/core/client.ts --format json
+slsp symbols -f src/core/client.ts
 
 # Step 3: confirm a symbol's meaning
-slsp hover       -f src/core/client.ts -l 30 -c 14 --format json
+slsp hover       -f src/core/client.ts -l 30 -c 14
 slsp definition  -f src/core/client.ts -l 30 -c 14 --format json
 
 # Step 4: check blast radius before editing
 slsp references  -f src/core/client.ts -l 30 -c 14 --format json
 
 # Step 5: edit, then validate
-slsp diagnostics -f src/core/client.ts --format json
+slsp diagnostics -f src/core/client.ts
 ```
 
 ## Where slsp adds the most value

@@ -46,9 +46,12 @@ Later layers replace entries with the same key:
 Inspect effective config:
 
 ```bash
-slsp config --format json
-slsp languages --format json
+slsp config
+slsp languages
 ```
+
+Add `--format json` when you want exact paths, counts, or the config object for
+another tool.
 
 ## Current schema
 
@@ -124,9 +127,12 @@ If `texlab` is installed and available on `PATH`:
 Then verify:
 
 ```bash
-slsp languages --format json
+slsp languages
 slsp servers -f paper.tex --format json
 ```
+
+`slsp languages` gives a quick registry scan; `slsp servers -f paper.tex
+--format json` shows the selected server and capability matrix.
 
 ## v1 compatibility
 
@@ -170,5 +176,5 @@ chooses one, config loading fails with `config_error`.
 | `Cannot start` / `ENOENT` | server executable missing | install server or use absolute `command` |
 | `unsupported_capability` | server started but lacks the LSP capability | choose another command/server |
 
-Bad config is fail-fast. `slsp` does not silently fall back to built-ins when a
-loaded user config is invalid.
+Bad config is fail-fast. Loaded user config takes precedence over built-ins,
+and invalid config surfaces as `config_error`.
