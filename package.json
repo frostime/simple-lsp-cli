@@ -39,9 +39,9 @@
     "dev": "tsc --watch",
     "clean": "node -e \"import('node:fs').then(fs => fs.rmSync('dist', { recursive: true, force: true }))\"",
     "pretest": "npm run build",
-    "test": "node --test test/unit/*.test.mjs test/integration/*.test.mjs",
+    "test": "node --test --test-concurrency=1 test/unit/*.test.mjs test/integration/*.test.mjs",
     "test:unit": "node --test test/unit/*.test.mjs",
-    "test:integration": "node --test test/integration/*.test.mjs",
+    "test:integration": "node --test --test-concurrency=1 test/integration/*.test.mjs",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {

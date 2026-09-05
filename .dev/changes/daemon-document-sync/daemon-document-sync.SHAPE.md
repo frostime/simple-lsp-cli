@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: completed
 ---
 
 # Daemon Document Synchronization
@@ -24,9 +24,14 @@ src/
 test/
 └── integration/
     └── daemon-sync.test.mjs
-        create  +180-300       deterministic fake-server coverage for session reuse, numeric and
+        create  +220-360       deterministic fake-server coverage for session reuse, numeric and
                                options-object sync capabilities, lifecycle fallback/error behavior,
-                               diagnostics freshness, empty publications, and same-URI overlap
+                               diagnostics freshness, empty publications, UTF-16 ranges, and
+                               same-URI overlap
+
+package.json
+    modify  +2/-2             serialize the full and integration test runners because daemon state
+                              is global to the local environment and daemon tests stop/start sessions
 ```
 
 No change is predicted for `src/daemon.ts` or `src/cli.ts`: they already preserve the session boundary and route every request through `LspClient`. No new synchronization module is justified unless the protocol handling grows beyond this client-local responsibility.
@@ -80,4 +85,4 @@ The existing real-server integration test may remain as smoke coverage, but it s
 
 The accepted boundary is: disk content is the source of truth for each request snapshot; `LspClient` negotiates and stores document synchronization capability once per LSP session; capability-aware synchronization is the normal path; `didClose` + `didOpen` is only a lifecycle-permitted compatibility fallback; and the client must not silently reuse a pre-change diagnostic cache. Versioned diagnostics receive a strong version comparison guarantee; unversioned diagnostics receive cache invalidation plus best-effort freshness only.
 
-A runtime probe of the built-in and configured servers may verify exact capability shapes and notification ordering before implementation. Current local evidence shows TypeScript and Pyright advertise numeric Incremental synchronization, while Rust Analyzer, TexLab, Svelte language server, and Pylsp advertise options objects with `openClose: true` and Incremental change. The initial standalone Pylsp probe timed out, but the project's own `LspClient` startup path successfully negotiated `{ change: 2, openClose: true, save: { includeText: true } }`; the timeout was a probe limitation, not a server capability finding. The probe does not reopen ownership or responsibility decisions. Persistent cross-session capability snapshots, production trial notifications, general diff computation, and config-level synchronization overrides remain out of scope unless implementation evidence changes the contract.
+The implementation matches the predicted ownership and file spread. The test runner is now serialized because the daemon uses a global state path; this is a test-environment constraint, not a production synchronization mechanism. Verified with the full suite (46 tests passing) and a real TypeScript daemon refresh smoke test.
