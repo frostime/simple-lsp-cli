@@ -22,7 +22,9 @@ test("pathToUri and uriToPath round-trip local paths", () => {
 
 test("uriToPath decodes percent-encoded Windows-style file URIs", () => {
   const decoded = uriToPath("file:///h%3A/Work/space%20name.ts");
-  assert.match(decoded, /^h:/i);
+  // fileURLToPath keeps the drive segment: "h:/..." on Windows, "/h:/..." on POSIX
+  const drivePrefix = process.platform === "win32" ? /^h:/i : /^\/h:/;
+  assert.match(decoded, drivePrefix);
   assert.ok(decoded.endsWith(path.join("Work", "space name.ts")));
 });
 
@@ -42,9 +44,12 @@ test("simplify converts Location URIs to local paths", () => {
     },
   });
 
+  const expectedFile = process.platform === "win32"
+    ? path.join("h:", "Work", "demo.ts")
+    : "/h:/Work/demo.ts";
   assert.equal(
     normalizePathCase(simplified.file),
-    normalizePathCase(path.join("h:", "Work", "demo.ts")),
+    normalizePathCase(expectedFile),
   );
   assert.deepEqual(simplified.range, {
     start: { line: 1, character: 2 },
