@@ -1,6 +1,6 @@
 {
   "name": "simple-lsp-cli",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "Agent-friendly CLI for invoking Language Server Protocol (LSP) methods",
   "license": "AGPL-3.0-only",
   "author": "frostime",
