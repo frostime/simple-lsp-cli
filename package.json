@@ -4,6 +4,7 @@
   "description": "Agent-friendly CLI for invoking Language Server Protocol (LSP) methods",
   "license": "AGPL-3.0-only",
   "author": "frostime",
+  "packageManager": "pnpm@11.4.0",
   "type": "module",
   "repository": {
     "type": "git",
