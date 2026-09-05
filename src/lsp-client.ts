@@ -35,18 +35,54 @@ interface LspRange {
   end: { line: number; character: number };
 }
 
+type TextDocumentSyncKind = 0 | 1 | 2;
+
+interface TextDocumentSyncOptions {
+  openClose?: boolean;
+  change?: TextDocumentSyncKind;
+}
+
+type DocumentSyncPlan =
+  | { kind: "change"; syncKind: 1 | 2 }
+  | { kind: "reopen" }
+  | { kind: "unsupported"; reason: string };
+
+interface DocumentState {
+  uri: string;
+  languageId: string;
+  text: string;
+  version: number;
+  diagnosticGeneration: number;
+}
+
+interface DiagnosticCache {
+  diagnostics: LspDiagnostic[];
+  version?: number;
+  generation: number;
+}
+
+interface DiagnosticWaiter {
+  generation: number;
+  resolve: (diagnostics: LspDiagnostic[]) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+interface PublishDiagnosticsParams {
+  uri: string;
+  version?: number;
+  diagnostics: LspDiagnostic[];
+}
+
 // ─── Client ───────────────────────────────────────────────────
 
 export class LspClient {
   private conn!: JsonRpcConnection;
   private proc!: ChildProcess;
-  private diagnosticsMap = new Map<string, LspDiagnostic[]>();
-  private diagnosticsWaiters = new Map<
-    string,
-    { resolve: (d: LspDiagnostic[]) => void; timer: ReturnType<typeof setTimeout> }
-  >();
-  private openedFiles = new Set<string>();
+  private diagnosticsMap = new Map<string, DiagnosticCache>();
+  private diagnosticsWaiters = new Map<string, DiagnosticWaiter[]>();
+  private documents = new Map<string, DocumentState>();
   private capabilities: Record<string, unknown> | null = null;
+  private documentSyncPlan: DocumentSyncPlan | null = null;
   private alive = false;
 
   constructor(private opts: LspClientOptions) {}
@@ -93,16 +129,7 @@ export class LspClient {
 
     // Collect diagnostics
     this.conn.onNotification("textDocument/publishDiagnostics", (params) => {
-      const p = params as { uri: string; diagnostics: LspDiagnostic[] };
-      const key = normalizeUri(p.uri);
-      this.diagnosticsMap.set(key, p.diagnostics);
-      const w = this.diagnosticsWaiters.get(key);
-      if (w && p.diagnostics.length > 0) {
-        // Only resolve on non-empty diagnostics; empty may be an initial placeholder
-        clearTimeout(w.timer);
-        this.diagnosticsWaiters.delete(key);
-        w.resolve(p.diagnostics);
-      }
+      this.handleDiagnostics(params as PublishDiagnosticsParams);
     });
 
     // Handle workspace/configuration requests from server
@@ -121,6 +148,9 @@ export class LspClient {
       rootUri,
       rootPath,
       capabilities: {
+        general: {
+          positionEncodings: ["utf-16"],
+        },
         textDocument: {
           hover: { contentFormat: ["markdown", "plaintext"] },
           completion: {
@@ -141,7 +171,7 @@ export class LspClient {
           formatting: {},
           codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: [] } } },
           rename: { prepareSupport: true },
-          publishDiagnostics: { relatedInformation: true },
+          publishDiagnostics: { relatedInformation: true, versionSupport: true },
           synchronization: { didSave: true },
         },
         workspace: {
@@ -154,6 +184,7 @@ export class LspClient {
     })) as Record<string, unknown>;
 
     this.capabilities = (result?.capabilities as Record<string, unknown> | undefined) ?? null;
+    this.documentSyncPlan = getDocumentSyncPlan(this.capabilities);
     this.conn.sendNotification("initialized", {});
     this.alive = true;
     this.log(`Server initialized (capabilities: ${Object.keys(this.capabilities ?? {}).length} items)`);
@@ -162,10 +193,12 @@ export class LspClient {
   async stop(): Promise<void> {
     if (!this.alive) return;
     try {
-      for (const uri of this.openedFiles) {
-        this.conn.sendNotification("textDocument/didClose", {
-          textDocument: { uri },
-        });
+      for (const document of this.documents.values()) {
+        if (this.documentSyncPlan?.kind !== "unsupported") {
+          this.conn.sendNotification("textDocument/didClose", {
+            textDocument: { uri: document.uri },
+          });
+        }
       }
       await this.conn.sendRequest("shutdown", null, 5000);
       this.conn.sendNotification("exit", null);
@@ -198,16 +231,58 @@ export class LspClient {
   async openFile(filePath: string): Promise<string> {
     const abs = path.resolve(filePath);
     const uri = pathToUri(abs);
-    if (this.openedFiles.has(uri)) return uri;
+    const key = normalizeUri(uri);
+    const plan = this.documentSyncPlan;
+
+    if (!plan || plan.kind === "unsupported") {
+      throw new Error(plan?.reason ?? "Language server synchronization is not initialized");
+    }
 
     const ext = path.extname(abs).slice(1);
-    const langId = getLanguageId(this.opts.server, ext);
+    const languageId = getLanguageId(this.opts.server, ext);
     const text = fs.readFileSync(abs, "utf-8");
+    const current = this.documents.get(key);
 
-    this.conn.sendNotification("textDocument/didOpen", {
-      textDocument: { uri, languageId: langId, version: 1, text },
-    });
-    this.openedFiles.add(uri);
+    if (!current) {
+      this.documents.set(key, {
+        uri,
+        languageId,
+        text,
+        version: 1,
+        diagnosticGeneration: 0,
+      });
+      this.conn.sendNotification("textDocument/didOpen", {
+        textDocument: { uri, languageId, version: 1, text },
+      });
+      return uri;
+    }
+
+    if (current.text === text) return uri;
+
+    const previousText = current.text;
+    const nextVersion = current.version + 1;
+    current.text = text;
+    current.version = nextVersion;
+    current.diagnosticGeneration += 1;
+    this.diagnosticsMap.delete(key);
+
+    if (plan.kind === "reopen") {
+      this.conn.sendNotification("textDocument/didClose", {
+        textDocument: { uri },
+      });
+      this.conn.sendNotification("textDocument/didOpen", {
+        textDocument: { uri, languageId: current.languageId, version: nextVersion, text },
+      });
+    } else {
+      const contentChange = plan.syncKind === 1
+        ? { text }
+        : { range: { start: { line: 0, character: 0 }, end: documentEndPosition(previousText) }, text };
+      this.conn.sendNotification("textDocument/didChange", {
+        textDocument: { uri, version: nextVersion },
+        contentChanges: [contentChange],
+      });
+    }
+
     return uri;
   }
 
@@ -292,7 +367,8 @@ export class LspClient {
     endLine: number, endChar: number
   ): Promise<unknown> {
     const uri = await this.openFile(file);
-    const diags = this.diagnosticsMap.get(uri) ?? [];
+    const key = normalizeUri(uri);
+    const diags = this.diagnosticsMap.get(key)?.diagnostics ?? [];
     return this.conn.sendRequest("textDocument/codeAction", {
       textDocument: { uri },
       range: {
@@ -306,23 +382,86 @@ export class LspClient {
   async diagnostics(file: string, waitMs = 5000): Promise<LspDiagnostic[]> {
     const uri = await this.openFile(file);
     const key = normalizeUri(uri);
+    const generation = this.documents.get(key)?.diagnosticGeneration ?? 0;
     const existing = this.diagnosticsMap.get(key);
-    if (existing && existing.length > 0) return existing;
+    if (existing && existing.generation === generation) return existing.diagnostics;
 
     return new Promise<LspDiagnostic[]>((resolve) => {
       const timer = setTimeout(() => {
-        this.diagnosticsWaiters.delete(key);
-        resolve(this.diagnosticsMap.get(key) ?? []);
+        const waiters = this.diagnosticsWaiters.get(key) ?? [];
+        this.diagnosticsWaiters.set(key, waiters.filter((waiter) => waiter.timer !== timer));
+        const current = this.diagnosticsMap.get(key);
+        resolve(current?.generation === generation ? current.diagnostics : []);
       }, waitMs);
-      this.diagnosticsWaiters.set(key, { resolve, timer });
+      const waiters = this.diagnosticsWaiters.get(key) ?? [];
+      waiters.push({ generation, resolve, timer });
+      this.diagnosticsWaiters.set(key, waiters);
     });
   }
 
   // ─── Internal ───────────────────────────────────────────────
 
+  private handleDiagnostics(params: PublishDiagnosticsParams) {
+    const key = normalizeUri(params.uri);
+    const document = this.documents.get(key);
+    if (params.version !== undefined && document && params.version < document.version) return;
+
+    const generation = document?.diagnosticGeneration ?? this.diagnosticsMap.get(key)?.generation ?? 0;
+    this.diagnosticsMap.set(key, {
+      diagnostics: params.diagnostics,
+      version: params.version,
+      generation,
+    });
+
+    const waiters = this.diagnosticsWaiters.get(key) ?? [];
+    const pending: DiagnosticWaiter[] = [];
+    for (const waiter of waiters) {
+      if (waiter.generation <= generation) {
+        clearTimeout(waiter.timer);
+        waiter.resolve(params.diagnostics);
+      } else {
+        pending.push(waiter);
+      }
+    }
+    if (pending.length > 0) this.diagnosticsWaiters.set(key, pending);
+    else this.diagnosticsWaiters.delete(key);
+  }
+
   private log(msg: string) {
     if (this.opts.verbose) process.stderr.write(`[slsp] ${msg}\n`);
   }
+}
+
+function getDocumentSyncPlan(capabilities: Record<string, unknown> | null): DocumentSyncPlan {
+  const sync = capabilities?.textDocumentSync;
+
+  if (sync === 1 || sync === 2) {
+    return { kind: "change", syncKind: sync };
+  }
+
+  if (sync && typeof sync === "object") {
+    const options = sync as TextDocumentSyncOptions;
+    if (options.openClose !== true) {
+      return {
+        kind: "unsupported",
+        reason: "Language server does not allow open/close document synchronization",
+      };
+    }
+    if (options.change === 1 || options.change === 2) {
+      return { kind: "change", syncKind: options.change };
+    }
+    return { kind: "reopen" };
+  }
+
+  return {
+    kind: "unsupported",
+    reason: "Language server does not advertise text document synchronization",
+  };
+}
+
+function documentEndPosition(text: string): LspRange["end"] {
+  const lines = text.split("\n");
+  return { line: lines.length - 1, character: lines[lines.length - 1].length };
 }
 
 // ─── URI Helpers ──────────────────────────────────────────────
